@@ -24,3 +24,10 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+.dashboard-content {
+  color: #000000 !important; /* Force black text */
+}
+
+.dark .dashboard-content {
+  color: #ffffff !important; /* Force white text for dark mode */
+}

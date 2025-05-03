@@ -663,3 +663,78 @@ export async function updateReceiptPrices(receiptId: string): Promise<Receipt> {
     throw error;
   }
 }
+
+/**
+ * Genera un remito con precios actualizados según los precios actuales de los productos
+ * 
+ * @param orderId - ID del pedido
+ * @returns Remito generado
+ */
+export async function generateUpdatedReceipt(orderId: string): Promise<Receipt> {
+  try {
+    // Obtener datos del pedido
+    const order = await getOrderById(orderId);
+    if (!order) {
+      throw new Error(`Pedido con ID ${orderId} no encontrado`);
+    }
+    
+    // Obtener datos del cliente
+    const client = await getClientById(order.clienteId);
+    if (!client) {
+      throw new Error(`Cliente con ID ${order.clienteId} no encontrado`);
+    }
+    
+    // Actualizar precios de los ítems según los precios actuales con margen
+    const items = await Promise.all(order.items.map(async (item) => {
+      // Obtener información del producto
+      const product = await getProductById(item.productoId);
+      if (!product) {
+        throw new Error(`Producto con ID ${item.productoId} no encontrado`);
+      }
+      
+      // Calcular precio con margen de ganancia
+      const precio = product.precio || 0;
+      const margen = product.margenGanancia || 1.1;
+      const precioVenta = precio * margen;
+      
+      // Calcular precio total
+      const precioTotal = precioVenta * item.cantidad;
+      
+      return {
+        ...item,
+        precioUnitario: precioVenta,
+        precioTotal: precioTotal
+      };
+    }));
+    
+    // Calcular total del remito
+    const total = items.reduce((sum, item) => sum + (item.precioTotal || 0), 0);
+    
+    // Crear objeto del remito
+    const remito = {
+      pedidoId: orderId,
+      clienteId: order.clienteId,
+      nombreCliente: client.nombre,
+      direccionCliente: client.direccion,
+      fechaEmision: new Date().toISOString(),
+      fechaEntrega: order.fechaEntrega,
+      items,
+      total,
+      estado: 'generado',
+      observaciones: order.observaciones || '',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
+    
+    // Guardar en Firestore
+    const docRef = await addDoc(collection(db, RECEIPTS_COLLECTION), remito);
+    
+    // Actualizar estado del pedido
+    await updateOrderStatus(orderId, 'procesado');
+    
+    return { id: docRef.id, ...remito } as Receipt;
+  } catch (error) {
+    console.error("Error al generar remito actualizado:", error);
+    throw error;
+  }
+}

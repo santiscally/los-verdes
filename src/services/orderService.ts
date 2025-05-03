@@ -643,37 +643,68 @@ export async function generatePurchaseList(
             if (unit === product.unidadPredeterminada) {
               totalInDefaultUnit += quantity;
             } else {
-              const convertedQty = convertUnits(
-                product, 
-                unit, 
-                product.unidadPredeterminada, 
-                quantity
-              );
-              totalInDefaultUnit += convertedQty;
+              // Intentar convertir a la unidad predeterminada
+              try {
+                const convertedQty = convertUnits(
+                  product, 
+                  unit, 
+                  product.unidadPredeterminada, 
+                  quantity
+                );
+                totalInDefaultUnit += convertedQty;
+              } catch (error) {
+                console.error(`Error al convertir de ${unit} a ${product.unidadPredeterminada}:`, error);
+                // Si falla la conversión, mantener la cantidad en la unidad original
+                if (!item.cantidadOptimaCompra.unidad) {
+                  item.cantidadOptimaCompra.unidad = unit;
+                  item.cantidadOptimaCompra.cantidad = quantity;
+                } else {
+                  // Si ya hay una unidad asignada, mantener la más grande
+                  if (quantity > item.cantidadOptimaCompra.cantidad) {
+                    item.cantidadOptimaCompra.unidad = unit;
+                    item.cantidadOptimaCompra.cantidad = quantity;
+                  }
+                }
+              }
             }
           } catch (error) {
-            console.error(`Error al convertir de ${unit} a ${product.unidadPredeterminada}:`, error);
+            console.error(`Error al procesar cantidades:`, error);
           }
         }
         
+        // Verificar stock existente
+        const currentStock = product.stock && product.stock[product.unidadPredeterminada] 
+          ? product.stock[product.unidadPredeterminada] 
+          : 0;
+        
+        // Restar stock existente de la cantidad requerida
+        const requiredQuantity = Math.max(0, totalInDefaultUnit - currentStock);
+        
         // Redondear hacia arriba para unidades enteras como cajones o bolsas
         if (['cajon', 'bolsa', 'bandeja', 'atado', 'riestra'].includes(product.unidadPredeterminada)) {
-          totalInDefaultUnit = Math.ceil(totalInDefaultUnit);
+          const roundedQuantity = Math.ceil(requiredQuantity);
+          item.cantidadOptimaCompra = {
+            unidad: product.unidadPredeterminada,
+            cantidad: roundedQuantity
+          };
+        } else {
+          // Para unidades continuas como kg, no es necesario redondear
+          item.cantidadOptimaCompra = {
+            unidad: product.unidadPredeterminada,
+            cantidad: requiredQuantity
+          };
         }
-        
-        // Actualizar cantidad óptima de compra
-        item.cantidadOptimaCompra = {
-          unidad: product.unidadPredeterminada,
-          cantidad: totalInDefaultUnit
-        };
         
         return item;
       })
     );
     
+    // Filtrar items con cantidad a comprar = 0
+    const itemsToOrder = itemsArray.filter(item => item.cantidadOptimaCompra.cantidad > 0);
+    
     return {
       fechaEntrega: deliveryDate,
-      items: itemsArray,
+      items: itemsToOrder,
       totalPedidos: orders.length
     };
   } catch (error) {
@@ -738,3 +769,5 @@ export async function calculateRequiredStock(
     throw error;
   }
 }
+
+

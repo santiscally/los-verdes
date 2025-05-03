@@ -1,3 +1,4 @@
+// src/app/dashboard/pedidos/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -6,7 +7,7 @@ import { createReceiptFromOrder } from '@/services/receiptService';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import OrderFormModal from '@/components/pedidos/OrderFormalModal';
-
+import GenerateReceiptModal from '@/components/pedidos/GenerateReceiptModal';
 
 interface OrderItem {
   productoId: string;
@@ -38,6 +39,8 @@ export default function PedidosPage() {
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [currentOrder, setCurrentOrder] = useState<Order | null>(null);
   const [successMessage, setSuccessMessage] = useState<string>('');
+  const [showReceiptModal, setShowReceiptModal] = useState<boolean>(false);
+  const [currentOrderId, setCurrentOrderId] = useState<string>('');
 
   // Cargar pedidos al montar el componente
   useEffect(() => {
@@ -93,7 +96,7 @@ export default function PedidosPage() {
     }
   }
 
-  // Función para generar remito desde pedido
+  // Función para generar remito desde pedido (directa)
   async function handleGenerateReceipt(id: string) {
     try {
       await createReceiptFromOrder(id);
@@ -104,6 +107,12 @@ export default function PedidosPage() {
       console.error('Error al generar remito:', err);
       setError('Error al generar el remito. Por favor, intenta nuevamente.');
     }
+  }
+
+  // Función para abrir el modal de generación de remitos
+  function openReceiptModal(id: string) {
+    setCurrentOrderId(id);
+    setShowReceiptModal(true);
   }
 
   // Formatear fecha
@@ -215,7 +224,7 @@ export default function PedidosPage() {
                           </button>
                           {order.estado === 'pendiente' && (
                             <button
-                              onClick={() => handleGenerateReceipt(order.id)}
+                              onClick={() => openReceiptModal(order.id)}
                               className="text-green-600 hover:text-green-800"
                               title="Generar Remito"
                             >
@@ -250,6 +259,20 @@ export default function PedidosPage() {
           onSave={() => {
             setIsModalOpen(false);
             loadOrders();
+          }}
+        />
+      )}
+
+      {/* Modal para generar remito */}
+      {showReceiptModal && (
+        <GenerateReceiptModal
+          orderId={currentOrderId}
+          onClose={() => setShowReceiptModal(false)}
+          onSuccess={() => {
+            setShowReceiptModal(false);
+            loadOrders();
+            setSuccessMessage('Remito generado correctamente');
+            setTimeout(() => setSuccessMessage(''), 3000);
           }}
         />
       )}

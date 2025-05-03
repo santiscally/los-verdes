@@ -1,36 +1,27 @@
+
+
+// src/app/dashboard/compras/page.tsx
 'use client';
 
+import { 
+  getAllPurchases, 
+  deletePurchase, 
+  updatePurchaseStatus,
+  Purchase,
+  PurchaseItem 
+} from '@/services/purchaseService';
 import { useState, useEffect } from 'react';
-import { getAllPurchases, deletePurchase } from '@/services/purchaseService';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-
-interface PurchaseItem {
-  productoId: string;
-  nombreProducto: string;
-  cantidad: number;
-  unidad: string;
-  precio: number;
-  precioTotal: number;
-  proveedor?: string;
-}
-
-interface Purchase {
-  id: string;
-  fechaCompra: string;
-  estado: string;
-  items: PurchaseItem[];
-  total: number;
-  observaciones?: string;
-}
+import PurchaseQuickEdit from '@/components/compras/PurchaseQuickEdit';
 
 export default function ComprasPage() {
-  const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [purchases, setPurchases] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
-  const [currentPurchase, setCurrentPurchase] = useState<Purchase | null>(null);
+  const [showPurchaseEdit, setShowPurchaseEdit] = useState<boolean>(false);
+  const [currentPurchaseId, setCurrentPurchaseId] = useState<string>('');
   const [successMessage, setSuccessMessage] = useState<string>('');
 
   // Cargar compras al montar el componente
@@ -53,12 +44,6 @@ export default function ComprasPage() {
     }
   }
 
-  // Función para abrir modal de creación/edición
-  function openPurchaseModal(purchase: Purchase | null = null) {
-    setCurrentPurchase(purchase);
-    setIsModalOpen(true);
-  }
-
   // Función para eliminar compra
   async function handleDeletePurchase(id: string) {
     if (window.confirm('¿Estás seguro de que deseas eliminar esta compra? Esto también revertirá los cambios en el inventario.')) {
@@ -71,6 +56,25 @@ export default function ComprasPage() {
         console.error('Error al eliminar compra:', err);
         setError('Error al eliminar la compra. Por favor, intenta nuevamente.');
       }
+    }
+  }
+
+  // Función para abrir edición rápida de compra
+  function handleEditPurchase(id: string) {
+    setCurrentPurchaseId(id);
+    setShowPurchaseEdit(true);
+  }
+
+  // Función para marcar compra como completada
+  async function handleCompletePurchase(id: string) {
+    try {
+      await updatePurchaseStatus(id, 'completada');
+      loadPurchases(); // Recargar compras
+      setSuccessMessage('Compra marcada como completada');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (err) {
+      console.error('Error al actualizar estado de compra:', err);
+      setError('Error al actualizar el estado de la compra. Por favor, intenta nuevamente.');
     }
   }
 
@@ -98,12 +102,6 @@ export default function ComprasPage() {
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">Compras</h1>
-        <button
-          onClick={() => openPurchaseModal()}
-          className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded flex items-center"
-        >
-          + Nueva Compra
-        </button>
       </div>
 
       {/* Barra de búsqueda */}
@@ -167,12 +165,21 @@ export default function ComprasPage() {
                       <td className="py-3 px-4">
                         <div className="flex justify-center space-x-2">
                           <button
-                            onClick={() => openPurchaseModal(purchase)}
+                            onClick={() => handleEditPurchase(purchase.id)}
                             className="text-blue-600 hover:text-blue-800"
-                            title="Editar"
+                            title="Editar Precios"
                           >
                             ✏️
                           </button>
+                          {purchase.estado === 'pendiente' && (
+                            <button
+                              onClick={() => handleCompletePurchase(purchase.id)}
+                              className="text-green-600 hover:text-green-800"
+                              title="Marcar como Completada"
+                            >
+                              ✅
+                            </button>
+                          )}
                           <button
                             onClick={() => handleDeletePurchase(purchase.id)}
                             className="text-red-600 hover:text-red-800"
@@ -191,17 +198,19 @@ export default function ComprasPage() {
         </>
       )}
 
-      {/* Modal para crear/editar compra - esto será un componente separado */}
-      {/* {isModalOpen && (
-        <PurchaseFormModal
-          purchase={currentPurchase}
-          onClose={() => setIsModalOpen(false)}
+      {/* Modal de edición rápida de compra */}
+      {showPurchaseEdit && (
+        <PurchaseQuickEdit
+          purchaseId={currentPurchaseId}
           onSave={() => {
-            setIsModalOpen(false);
+            setShowPurchaseEdit(false);
             loadPurchases();
+            setSuccessMessage('Compra actualizada correctamente');
+            setTimeout(() => setSuccessMessage(''), 3000);
           }}
+          onCancel={() => setShowPurchaseEdit(false)}
         />
-      )} */}
+      )}
     </div>
   );
 }

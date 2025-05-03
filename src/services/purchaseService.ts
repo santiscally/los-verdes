@@ -27,7 +27,6 @@ export interface PurchaseItem {
   unidad: string;
   precio: number;
   precioTotal: number;
-  proveedor?: string;
 }
 
 export interface Purchase {
@@ -348,8 +347,7 @@ export async function generatePurchaseFromConsolidatedOrders(
         cantidad: item.cantidad,
         unidad: item.unidad,
         precio: product.precio || 0,
-        precioTotal: (product.precio || 0) * item.cantidad,
-        proveedor: product.proveedor || ""
+        precioTotal: (product.precio || 0) * item.cantidad
       };
     }));
     
@@ -377,6 +375,118 @@ export async function generatePurchaseFromConsolidatedOrders(
     return { id: docRef.id, ...compra } as Purchase;
   } catch (error) {
     console.error("Error al generar compra desde pedidos consolidados:", error);
+    throw error;
+  }
+}
+
+/**
+ * Actualizar el estado de una compra
+ * 
+ * @param purchaseId - ID de la compra
+ * @param newStatus - Nuevo estado
+ * @returns Compra actualizada
+ */
+export async function updatePurchaseStatus(
+  purchaseId: string, 
+  newStatus: string
+): Promise<Purchase> {
+  try {
+    const docRef = doc(db, PURCHASES_COLLECTION, purchaseId);
+    
+    // Verificar si la compra existe
+    const purchaseDoc = await getDoc(docRef);
+    if (!purchaseDoc.exists()) {
+      throw new Error(`Compra con ID ${purchaseId} no encontrada`);
+    }
+    
+    const purchase = purchaseDoc.data();
+    
+    // Si la compra pasa de pendiente a completada, actualizar el stock
+    if (purchase.estado === 'pendiente' && newStatus === 'completada') {
+      // Actualizar stock para cada ítem
+      for (const item of purchase.items) {
+        await updateProductStock(
+          item.productoId, 
+          { [item.unidad]: item.cantidad }
+        );
+      }
+    }
+    
+    // Actualizar estado de la compra
+    const updates = {
+      estado: newStatus,
+      updatedAt: serverTimestamp()
+    };
+    
+    await updateDoc(docRef, updates);
+    
+    return { 
+      id: purchaseId, 
+      ...purchase,
+      ...updates 
+    } as Purchase;
+  } catch (error) {
+    console.error("Error al actualizar estado de compra:", error);
+    throw error;
+  }
+}
+
+/**
+ * Actualiza los precios de una compra y actualiza el stock
+ * 
+ * @param purchaseId - ID de la compra
+ * @param updatedItems - Lista de items con precios actualizados
+ * @returns Compra actualizada
+ */
+export async function updatePurchasePrices(
+  purchaseId: string,
+  updatedItems: PurchaseItem[]
+): Promise<Purchase> {
+  try {
+    const docRef = doc(db, PURCHASES_COLLECTION, purchaseId);
+    
+    // Verificar si la compra existe
+    const purchaseDoc = await getDoc(docRef);
+    if (!purchaseDoc.exists()) {
+      throw new Error(`Compra con ID ${purchaseId} no encontrada`);
+    }
+    
+    const purchase = purchaseDoc.data();
+    
+    // Actualizar precios de productos
+    for (const item of updatedItems) {
+      // Solo actualizar si el precio cambió
+      const originalItem = purchase.items.find((i: PurchaseItem) => i.productoId === item.productoId);
+      if (originalItem && originalItem.precio !== item.precio) {
+        await updateProductPrice(item.productoId, item.precio);
+      }
+    }
+    
+    // Calcular nuevo total
+    const total = updatedItems.reduce((sum, item) => sum + item.precioTotal, 0);
+    
+    // Actualizar la compra
+    const updates = {
+      items: updatedItems,
+      total,
+      updatedAt: serverTimestamp()
+    };
+    
+    await updateDoc(docRef, updates);
+    
+    // Si la compra estaba en estado pendiente, actualizarla a completada y actualizar stock
+    if (purchase.estado === 'pendiente') {
+      await updatePurchaseStatus(purchaseId, 'completada');
+    }
+    
+    return { 
+      id: purchaseId, 
+      ...purchase, 
+      ...updates,
+      estado: 'completada'
+    } as Purchase;
+  } catch (error) {
+    console.error("Error al actualizar precios de compra:", error);
     throw error;
   }
 }

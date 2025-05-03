@@ -24,6 +24,7 @@ export default function MainLayout({ children }: MainLayoutProps) {
     { path: '/dashboard/productos', name: 'Productos', icon: '📦' },
     { path: '/dashboard/clientes', name: 'Clientes', icon: '👥' },
     { path: '/dashboard/pedidos', name: 'Pedidos', icon: '🛒' },
+    { path: '/dashboard/consolidacion', name: 'Consolidación', icon: '📋' },
     { path: '/dashboard/compras', name: 'Compras', icon: '🛍️' },
     { path: '/dashboard/remitos', name: 'Remitos', icon: '📄' },
     { path: '/dashboard/importar', name: 'Importar', icon: '📥' },

@@ -59,13 +59,11 @@ export async function importProductsFromCSV(csvFile: File | string): Promise<Imp
           nombre: product.nombre || product.ITEM || '',
           unidadPredeterminada: product.unidad || product.UM || 'unidad',
           precio: product.precio || product.Precio || 0,
-          proveedor: product.proveedor || product['Precio Referencia'] || '',
           stock: { [product.unidad || product.UM || 'unidad']: product.stock || 0 },
-          margenGanancia: 1.1, // 10% de margen por defecto
-          categoria: product.categoria || 'general',
+          margenGanancia: Math.round((product.margenGanancia || 1.1) * 10) / 10,
           conversiones: {}
         };
-
+        
         // Procesar conversiones si existen
         if (product.kgPorUnidad || product['q kg']) {
           if (!processedProduct.conversiones) {

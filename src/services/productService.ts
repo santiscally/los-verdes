@@ -30,12 +30,10 @@ export interface Conversiones {
 export interface Product {
   id?: string;
   nombre: string;
-  unidadPredeterminada: string;  // Unidad principal de compra (cajon, bolsa, etc.)
-  unidadesSecundarias?: string[]; // Otras unidades válidas
+  unidadPredeterminada: string;
+  unidadesSecundarias?: string[]; // Mantenemos para compatibilidad
   precio?: number;
-  proveedor?: string;
-  margenGanancia?: number;
-  categoria?: string;
+  margenGanancia?: number; // Limitado a 1 decimal
   stock?: {
     [key: string]: number;
   };
@@ -60,10 +58,14 @@ const PRODUCTS_COLLECTION = 'productos';
  */
 export async function createProduct(productData: Omit<Product, 'id'>): Promise<Product> {
   try {
-    // Agregar un margen de ganancia predeterminado del 10% si no se especifica
+    // Redondear el margen de ganancia a 1 decimal si existe
+    const margenGanancia = productData.margenGanancia 
+      ? Math.round(productData.margenGanancia * 10) / 10 
+      : 1.1;
+    
     const productWithDefaults = {
       ...productData,
-      margenGanancia: productData.margenGanancia || 1.1,
+      margenGanancia,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
@@ -149,32 +151,6 @@ export async function getAllProducts(): Promise<Product[]> {
 }
 
 /**
- * Obtener productos por categoría
- * 
- * @param category - Categoría a buscar
- * @returns Lista de productos de esa categoría
- */
-export async function getProductsByCategory(category: string): Promise<Product[]> {
-  try {
-    const q = query(
-      collection(db, PRODUCTS_COLLECTION), 
-      where("categoria", "==", category)
-    );
-    const querySnapshot = await getDocs(q);
-    const products: Product[] = [];
-    
-    querySnapshot.forEach((doc: QueryDocumentSnapshot<DocumentData>) => {
-      products.push({ id: doc.id, ...doc.data() } as Product);
-    });
-    
-    return products;
-  } catch (error) {
-    console.error("Error al obtener productos por categoría:", error);
-    throw error;
-  }
-}
-
-/**
  * Actualizar un producto
  * 
  * @param productId - ID del producto
@@ -188,9 +164,15 @@ export async function updateProduct(
   try {
     const docRef = doc(db, PRODUCTS_COLLECTION, productId);
     
+    // Si se proporciona margenGanancia, redondearlo a 1 decimal
+    let updates = { ...productData };
+    if (updates.margenGanancia !== undefined) {
+      updates.margenGanancia = Math.round(updates.margenGanancia * 10) / 10;
+    }
+    
     // Agregar timestamp de actualización
-    const updates = {
-      ...productData,
+    updates = {
+      ...updates,
       updatedAt: serverTimestamp(),
     };
     

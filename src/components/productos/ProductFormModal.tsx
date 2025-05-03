@@ -1,3 +1,6 @@
+// src/components/productos/ProductFormModal.tsx
+// Simplificar el formulario de creación/edición de productos
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -14,9 +17,7 @@ interface Product {
   nombre: string;
   unidadPredeterminada?: string;
   precio?: number;
-  proveedor?: string;
   margenGanancia?: number;
-  categoria?: string;
   stock?: {
     [key: string]: number;
   };
@@ -34,9 +35,7 @@ export default function ProductFormModal({ product, onClose, onSave }: ProductFo
     nombre: '',
     unidadPredeterminada: 'unidad',
     precio: 0,
-    proveedor: '',
-    margenGanancia: 1.1,
-    categoria: 'general',
+    margenGanancia: 1.1, // default 10%
     conversiones: {}
   });
 
@@ -51,9 +50,7 @@ export default function ProductFormModal({ product, onClose, onSave }: ProductFo
         nombre: product.nombre || '',
         unidadPredeterminada: product.unidadPredeterminada || 'unidad',
         precio: product.precio || 0,
-        proveedor: product.proveedor || '',
         margenGanancia: product.margenGanancia || 1.1,
-        categoria: product.categoria || 'general',
         conversiones: product.conversiones || {}
       });
     }
@@ -68,7 +65,9 @@ export default function ProductFormModal({ product, onClose, onSave }: ProductFo
     } else if (name === 'margenGanancia') {
       // Convertir de porcentaje a multiplicador (ej: 10% -> 1.1)
       const margin = parseFloat(value) || 0;
-      setFormData({ ...formData, [name]: 1 + (margin / 100) });
+      // Redondear a 1 decimal
+      const roundedMargin = Math.round((1 + (margin / 100)) * 10) / 10;
+      setFormData({ ...formData, [name]: roundedMargin });
     } else {
       setFormData({ ...formData, [name]: value });
     }
@@ -156,50 +155,30 @@ export default function ProductFormModal({ product, onClose, onSave }: ProductFo
             />
           </div>
           
-          <div className="mb-4 grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="unidadPredeterminada">
-                Unidad Predeterminada *
-              </label>
-              <select
-                id="unidadPredeterminada"
-                name="unidadPredeterminada"
-                value={formData.unidadPredeterminada}
-                onChange={handleChange}
-                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                required
-              >
-                <option value="unidad">Unidad</option>
-                <option value="kg">Kilogramo</option>
-                <option value="cajon">Cajón</option>
-                <option value="bolsa">Bolsa</option>
-                <option value="bandeja">Bandeja</option>
-              </select>
-            </div>
-            
-            <div>
-              <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="categoria">
-                Categoría
-              </label>
-              <select
-                id="categoria"
-                name="categoria"
-                value={formData.categoria}
-                onChange={handleChange}
-                className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-              >
-                <option value="general">General</option>
-                <option value="verduras">Verduras</option>
-                <option value="frutas">Frutas</option>
-                <option value="hierbas">Hierbas</option>
-              </select>
-            </div>
+          <div className="mb-4">
+            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="unidadPredeterminada">
+              Unidad Predeterminada *
+            </label>
+            <select
+              id="unidadPredeterminada"
+              name="unidadPredeterminada"
+              value={formData.unidadPredeterminada}
+              onChange={handleChange}
+              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              required
+            >
+              <option value="unidad">Unidad</option>
+              <option value="kg">Kilogramo</option>
+              <option value="cajon">Cajón</option>
+              <option value="bolsa">Bolsa</option>
+              <option value="bandeja">Bandeja</option>
+            </select>
           </div>
           
           <div className="mb-4 grid grid-cols-2 gap-4">
             <div>
               <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="precio">
-                Precio *
+                Precio
               </label>
               <input
                 type="number"
@@ -210,7 +189,6 @@ export default function ProductFormModal({ product, onClose, onSave }: ProductFo
                 min="0"
                 step="0.01"
                 className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                required
               />
             </div>
             
@@ -229,20 +207,6 @@ export default function ProductFormModal({ product, onClose, onSave }: ProductFo
                 className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
               />
             </div>
-          </div>
-          
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2" htmlFor="proveedor">
-              Proveedor
-            </label>
-            <input
-              type="text"
-              id="proveedor"
-              name="proveedor"
-              value={formData.proveedor}
-              onChange={handleChange}
-              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            />
           </div>
           
           <div className="mb-4">

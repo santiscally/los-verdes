@@ -1,15 +1,25 @@
+// src/components/pedidos/OrderFormModal.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
 import { createOrder, updateOrder } from '@/services/orderService';
-import { getAllClients, Client } from '@/services/clientService';
-import { getAllProducts, Product } from '@/services/productService';
+import { getAllClients } from '@/services/clientService';
+import { 
+  getAllProducts, 
+  getProductById, 
+  getProductsByName,
+  convertUnits,
+  Product
+} from '@/services/productService';
 import { FaPlus, FaTrash } from 'react-icons/fa';
 import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import QuickProductCreation from '@/components/productos/QuickProductCreation';
+import UnitConversionRequest from '@/components/productos/UnitConversionRequest';
 
+// Restauramos las interfaces originales
 interface OrderItem {
   productoId: string;
   nombreProducto: string;
@@ -46,12 +56,21 @@ export default function OrderFormModal({ order, onClose, onSave }: OrderFormModa
     observaciones: ''
   });
 
-  const [clients, setClients] = useState<Client[]>([]);
+  const [clients, setClients] = useState<any[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<boolean>(false);
   const [dataLoading, setDataLoading] = useState<boolean>(true);
+  
+  // Estados para controlar la creación de productos y conversiones
+  const [showProductCreation, setShowProductCreation] = useState<boolean>(false);
+  const [newProductData, setNewProductData] = useState<{ nombre: string; unidad: string }>({ nombre: '', unidad: '' });
+  const [showConversionRequest, setShowConversionRequest] = useState<boolean>(false);
+  const [conversionData, setConversionData] = useState<{ product: Product | null; newUnit: string; itemIndex: number }>({ product: null, newUnit: '', itemIndex: -1 });
+  const [productSearchTerm, setProductSearchTerm] = useState<string>('');
+  const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
+  const [activeItemIndex, setActiveItemIndex] = useState<number>(-1);
 
   // Cargar datos necesarios al montar el componente
   useEffect(() => {
@@ -61,7 +80,9 @@ export default function OrderFormModal({ order, onClose, onSave }: OrderFormModa
   // Si hay un pedido, cargar sus datos
   useEffect(() => {
     if (order) {
-      const fechaEntrega = order.fechaEntrega ? new Date(order.fechaEntrega) : new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const fechaEntrega = order.fechaEntrega ? 
+        (typeof order.fechaEntrega === 'string' ? new Date(order.fechaEntrega) : order.fechaEntrega) : 
+        new Date(Date.now() + 24 * 60 * 60 * 1000);
       
       setFormData({
         clienteId: order.clienteId || '',
@@ -75,10 +96,24 @@ export default function OrderFormModal({ order, onClose, onSave }: OrderFormModa
           unidad: item.unidad || 'unidad',
           observaciones: item.observaciones || ''
         })) || [],
-        observaciones: order.observaciones || ''
+        observaciones: order.observaciones || '',
+        estado: order.estado,
+        total: order.total
       });
     }
   }, [order]);
+
+  // Filtrar productos cuando cambia el término de búsqueda
+  useEffect(() => {
+    if (productSearchTerm.length > 2) {
+      const filtered = products.filter(product => 
+        product.nombre.toLowerCase().includes(productSearchTerm.toLowerCase())
+      );
+      setFilteredProducts(filtered);
+    } else {
+      setFilteredProducts([]);
+    }
+  }, [productSearchTerm, products]);
 
   // Cargar clientes y productos
   async function loadData() {
@@ -115,10 +150,8 @@ export default function OrderFormModal({ order, onClose, onSave }: OrderFormModa
   };
 
   // Manejar cambio de fecha
-  const handleDateChange = (date: Date | null) => {
-    if (date) {
-      setFormData({ ...formData, fechaEntrega: date });
-    }
+  const handleDateChange = (date: Date) => {
+    setFormData({ ...formData, fechaEntrega: date });
   };
 
   // Agregar ítem al pedido
@@ -146,26 +179,190 @@ export default function OrderFormModal({ order, onClose, onSave }: OrderFormModa
   };
 
   // Manejar cambios en los ítems
-  const handleItemChange = (index: number, e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+  const handleItemChange = async (index: number, e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     const updatedItems = [...formData.items];
     
     if (name === 'productoId') {
-      const selectedProduct = products.find(product => product.id === value);
+      try {
+        // Si se selecciona un producto existente
+        if (value) {
+          const selectedProduct = products.find(product => product.id === value);
+          if (selectedProduct) {
+            // Verificar si la unidad actual es válida para este producto
+            const currentUnit = updatedItems[index].unidad;
+            
+            if (currentUnit && currentUnit !== selectedProduct.unidadPredeterminada) {
+              // Verificar si existe conversión para esta unidad
+              try {
+                // Intentar obtener la conversión
+                convertUnits(selectedProduct, currentUnit, selectedProduct.unidadPredeterminada, 1);
+                // Si no lanza error, la conversión existe
+              } catch (err) {
+                // No existe conversión, mostrar modal para solicitarla
+                setConversionData({
+                  product: selectedProduct,
+                  newUnit: currentUnit,
+                  itemIndex: index
+                });
+                setShowConversionRequest(true);
+                return;
+              }
+            }
+            
+            updatedItems[index] = {
+              ...updatedItems[index],
+              productoId: value,
+              nombreProducto: selectedProduct.nombre,
+              unidad: currentUnit || selectedProduct.unidadPredeterminada
+            };
+          }
+        }
+      } catch (err) {
+        console.error('Error al procesar cambio de producto:', err);
+      }
+    } else if (name === 'nombreProducto') {
+      // Manejar búsqueda de producto por nombre
+      setProductSearchTerm(value);
+      setActiveItemIndex(index);
+      
       updatedItems[index] = {
         ...updatedItems[index],
-        productoId: value,
-        nombreProducto: selectedProduct ? selectedProduct.nombre : '',
-        unidad: selectedProduct ? selectedProduct.unidadPredeterminada || 'unidad' : 'unidad'
+        nombreProducto: value,
+        productoId: '' // Limpiar ID si se edita manualmente el nombre
+      };
+    } else if (name === 'unidad') {
+      const productoId = updatedItems[index].productoId;
+      
+      if (productoId) {
+        // Si ya hay un producto seleccionado, verificar si la unidad es válida
+        try {
+          const product = await getProductById(productoId);
+          
+          if (product) {
+            try {
+              // Verificar si existe conversión para esta unidad
+              convertUnits(product, value, product.unidadPredeterminada, 1);
+              // Si no lanza error, la conversión existe
+            } catch (err) {
+              // No existe conversión, mostrar modal para solicitarla
+              setConversionData({
+                product,
+                newUnit: value,
+                itemIndex: index
+              });
+              setShowConversionRequest(true);
+              
+              // Actualizar temporalmente la unidad en el formulario
+              updatedItems[index] = {
+                ...updatedItems[index],
+                unidad: value
+              };
+              setFormData({ ...formData, items: updatedItems });
+              return;
+            }
+          }
+        } catch (err) {
+          console.error('Error al verificar unidad:', err);
+        }
+      }
+      
+      updatedItems[index] = {
+        ...updatedItems[index],
+        unidad: value
+      };
+    } else if (name === 'cantidad') {
+      updatedItems[index] = {
+        ...updatedItems[index],
+        cantidad: parseFloat(value) || 0
       };
     } else {
       updatedItems[index] = {
         ...updatedItems[index],
-        [name]: name === 'cantidad' ? parseFloat(value) || 0 : value
+        [name]: value
       };
     }
     
     setFormData({ ...formData, items: updatedItems });
+  };
+
+  // Manejar selección de producto desde la búsqueda
+  const handleProductSelect = (product: Product) => {
+    if (activeItemIndex >= 0) {
+      const updatedItems = [...formData.items];
+      updatedItems[activeItemIndex] = {
+        ...updatedItems[activeItemIndex],
+        productoId: product.id!,
+        nombreProducto: product.nombre,
+        unidad: product.unidadPredeterminada
+      };
+      
+      setFormData({ ...formData, items: updatedItems });
+      setProductSearchTerm('');
+      setFilteredProducts([]);
+      setActiveItemIndex(-1);
+    }
+  };
+
+  // Manejar creación de nuevo producto
+  const handleCreateNewProduct = () => {
+    if (activeItemIndex >= 0 && productSearchTerm) {
+      setNewProductData({
+        nombre: productSearchTerm,
+        unidad: formData.items[activeItemIndex].unidad || 'unidad'
+      });
+      setShowProductCreation(true);
+    }
+  };
+
+  // Manejar guardado de nuevo producto
+  const handleProductCreated = async (productId: string) => {
+    try {
+      // Cargar el nuevo producto
+      const newProduct = await getProductById(productId);
+      
+      if (newProduct && activeItemIndex >= 0) {
+        // Actualizar la lista de productos
+        setProducts([...products, newProduct]);
+        
+        // Actualizar el ítem del pedido
+        const updatedItems = [...formData.items];
+        updatedItems[activeItemIndex] = {
+          ...updatedItems[activeItemIndex],
+          productoId: newProduct.id!,
+          nombreProducto: newProduct.nombre,
+          unidad: newProduct.unidadPredeterminada
+        };
+        
+        setFormData({ ...formData, items: updatedItems });
+      }
+      
+      setShowProductCreation(false);
+      setProductSearchTerm('');
+      setActiveItemIndex(-1);
+    } catch (err) {
+      console.error('Error al procesar nuevo producto:', err);
+    }
+  };
+
+  // Manejar guardado de conversión
+  const handleConversionSaved = async () => {
+    try {
+      if (conversionData.itemIndex >= 0 && conversionData.product) {
+        // Recargar el producto con las conversiones actualizadas
+        const updatedProduct = await getProductById(conversionData.product.id!);
+        
+        if (updatedProduct) {
+          // Actualizar la lista de productos
+          setProducts(products.map(p => p.id === updatedProduct.id ? updatedProduct : p));
+        }
+      }
+      
+      setShowConversionRequest(false);
+      setConversionData({ product: null, newUnit: '', itemIndex: -1 });
+    } catch (err) {
+      console.error('Error al actualizar después de guardar conversión:', err);
+    }
   };
 
   // Guardar pedido
@@ -195,9 +392,7 @@ export default function OrderFormModal({ order, onClose, onSave }: OrderFormModa
       // Preparar datos para guardar
       const orderData = {
         ...formData,
-        fechaEntrega: formData.fechaEntrega instanceof Date ? 
-          format(formData.fechaEntrega, "yyyy-MM-dd'T'HH:mm:ss") : 
-          formData.fechaEntrega
+        fechaEntrega: format(formData.fechaEntrega as Date, "yyyy-MM-dd'T'HH:mm:ss")
       };
       
       if (order?.id) {
@@ -276,7 +471,7 @@ export default function OrderFormModal({ order, onClose, onSave }: OrderFormModa
                   Fecha de Entrega *
                 </label>
                 <DatePicker
-                  selected={formData.fechaEntrega instanceof Date ? formData.fechaEntrega : new Date(formData.fechaEntrega)}
+                  selected={formData.fechaEntrega as Date}
                   onChange={handleDateChange}
                   dateFormat="dd/MM/yyyy"
                   className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
@@ -307,23 +502,47 @@ export default function OrderFormModal({ order, onClose, onSave }: OrderFormModa
                   {formData.items.map((item, index) => (
                     <div key={index} className="flex items-start space-x-2 p-3 border border-gray-200 rounded">
                       <div className="flex-grow grid grid-cols-12 gap-2">
-                        <div className="col-span-5">
-                          <select
-                            name="productoId"
-                            value={item.productoId}
+                        {/* Producto */}
+                        <div className="col-span-5 relative">
+                          <input
+                            type="text"
+                            name="nombreProducto"
+                            value={item.nombreProducto}
                             onChange={(e) => handleItemChange(index, e)}
                             className="shadow appearance-none border rounded w-full py-2 px-2 text-gray-700 text-sm leading-tight focus:outline-none focus:shadow-outline"
+                            placeholder="Buscar producto..."
                             required
-                          >
-                            <option value="">Seleccionar producto...</option>
-                            {products.map(product => (
-                              <option key={product.id} value={product.id}>
-                                {product.nombre}
-                              </option>
-                            ))}
-                          </select>
+                          />
+                          
+                          {/* Resultados de búsqueda */}
+                          {activeItemIndex === index && filteredProducts.length > 0 && (
+                            <div className="absolute z-10 w-full mt-1 bg-white shadow-lg rounded-md max-h-48 overflow-y-auto border border-gray-300">
+                              {filteredProducts.map((product) => (
+                                <div 
+                                  key={product.id}
+                                  className="px-3 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                                  onClick={() => handleProductSelect(product)}
+                                >
+                                  {product.nombre}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          
+                          {/* Opción para crear nuevo producto */}
+                          {activeItemIndex === index && productSearchTerm.length > 2 && filteredProducts.length === 0 && (
+                            <div className="absolute z-10 w-full mt-1 bg-white shadow-lg rounded-md border border-gray-300">
+                              <div 
+                                className="px-3 py-2 hover:bg-green-50 cursor-pointer text-sm text-green-700 flex items-center"
+                                onClick={handleCreateNewProduct}
+                              >
+                                <FaPlus className="mr-1" /> Crear "{productSearchTerm}"
+                              </div>
+                            </div>
+                          )}
                         </div>
                         
+                        {/* Cantidad */}
                         <div className="col-span-2">
                           <input
                             type="number"
@@ -338,6 +557,7 @@ export default function OrderFormModal({ order, onClose, onSave }: OrderFormModa
                           />
                         </div>
                         
+                        {/* Unidad */}
                         <div className="col-span-2">
                           <select
                             name="unidad"
@@ -350,9 +570,11 @@ export default function OrderFormModal({ order, onClose, onSave }: OrderFormModa
                             <option value="cajon">Cajón</option>
                             <option value="bolsa">Bolsa</option>
                             <option value="bandeja">Bandeja</option>
+                            <option value="atado">Atado</option>
                           </select>
                         </div>
                         
+                        {/* Observaciones */}
                         <div className="col-span-3">
                           <input
                             type="text"
@@ -414,6 +636,26 @@ export default function OrderFormModal({ order, onClose, onSave }: OrderFormModa
           </form>
         )}
       </div>
+      
+      {/* Modal de creación rápida de productos */}
+      {showProductCreation && (
+        <QuickProductCreation
+          productName={newProductData.nombre}
+          initialUnit={newProductData.unidad}
+          onSave={handleProductCreated}
+          onCancel={() => setShowProductCreation(false)}
+        />
+      )}
+      
+      {/* Modal de solicitud de conversión */}
+      {showConversionRequest && conversionData.product && (
+        <UnitConversionRequest
+          product={conversionData.product}
+          newUnit={conversionData.newUnit}
+          onSave={handleConversionSaved}
+          onCancel={() => setShowConversionRequest(false)}
+        />
+      )}
     </div>
   );
 }

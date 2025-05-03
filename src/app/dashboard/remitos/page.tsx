@@ -1,40 +1,29 @@
+// src/app/dashboard/remitos/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getAllReceipts, deleteReceipt, markReceiptAsDelivered } from '@/services/receiptService';
+import { 
+  getAllReceipts, 
+  deleteReceipt, 
+  markReceiptAsDelivered,
+  getReceiptById,
+  Receipt
+} from '@/services/receiptService';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import ReceiptDeliveryModal from '@/components/remitos/ReceiptDeliveryModal';
+import ReceiptPreview from '@/components/remitos/ReceiptPreview';
 
-interface ReceiptItem {
-  productoId: string;
-  nombreProducto: string;
-  cantidad: number;
-  unidad: string;
-  precioUnitario: number;
-  precioTotal: number;
-}
-
-interface Receipt {
-  id: string;
-  pedidoId: string;
-  clienteId: string;
-  nombreCliente: string;
-  direccionCliente?: string;
-  fechaEmision: string;
-  fechaEntrega: string;
-  items: ReceiptItem[];
-  total: number;
-  estado: string;
-  observaciones?: string;
-  firmadoPor?: string;
-  urlFirma?: string;
-}
 
 export default function RemitosPage() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [showPreview, setShowPreview] = useState<boolean>(false);
+  const [showDeliveryModal, setShowDeliveryModal] = useState<boolean>(false);
+  const [currentReceiptId, setCurrentReceiptId] = useState<string>('');
+  const [selectedReceipt, setSelectedReceipt] = useState<Receipt | null>(null);
   const [successMessage, setSuccessMessage] = useState<string>('');
 
   // Cargar remitos al montar el componente
@@ -72,177 +61,27 @@ export default function RemitosPage() {
     }
   }
 
-  // Función para marcar remito como entregado
-  async function handleMarkAsDelivered(id: string) {
-    const signedBy = prompt('Ingrese el nombre de quien recibió el pedido:');
-    if (signedBy) {
-      try {
-        await markReceiptAsDelivered(id, signedBy);
-        loadReceipts(); // Recargar remitos
-        setSuccessMessage('Remito marcado como entregado correctamente');
-        setTimeout(() => setSuccessMessage(''), 3000);
-      } catch (err) {
-        console.error('Error al marcar remito como entregado:', err);
-        setError('Error al marcar el remito como entregado. Por favor, intenta nuevamente.');
+  // Función para abrir la vista previa de un remito
+  async function handlePreviewReceipt(id: string) {
+    try {
+      setLoading(true);
+      const receipt = await getReceiptById(id);
+      if (receipt) {
+        setSelectedReceipt(receipt);
+        setShowPreview(true);
       }
+    } catch (err) {
+      console.error('Error al cargar remito:', err);
+      setError('Error al cargar el remito para vista previa.');
+    } finally {
+      setLoading(false);
     }
   }
 
-  // Función para imprimir remito
-  function handlePrintReceipt(receipt: Receipt) {
-    // Abrir una nueva ventana para imprimir
-    const printWindow = window.open('', '_blank');
-    
-    if (!printWindow) {
-      alert('Por favor, permite las ventanas emergentes para esta página');
-      return;
-    }
-    
-    // Crear contenido HTML del remito
-    const content = `
-      <!DOCTYPE html>
-      <html lang="es">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Remito - ${receipt.nombreCliente}</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 20px;
-          }
-          .header {
-            text-align: center;
-            margin-bottom: 20px;
-            border-bottom: 1px solid #ccc;
-            padding-bottom: 10px;
-          }
-          .info {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 20px;
-          }
-          .info-section {
-            width: 45%;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-          }
-          th, td {
-            padding: 8px;
-            text-align: left;
-            border-bottom: 1px solid #ddd;
-          }
-          th {
-            background-color: #f5f5f5;
-          }
-          .total {
-            text-align: right;
-            font-weight: bold;
-            margin-top: 20px;
-          }
-          .footer {
-            margin-top: 30px;
-            border-top: 1px solid #ccc;
-            padding-top: 10px;
-            text-align: center;
-          }
-          .signature {
-            margin-top: 50px;
-            display: flex;
-            justify-content: space-between;
-          }
-          .signature-line {
-            width: 40%;
-            border-top: 1px solid #000;
-            padding-top: 5px;
-            text-align: center;
-          }
-          @media print {
-            .no-print {
-              display: none;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>Los Verdes</h1>
-          <h2>Remito de Entrega</h2>
-        </div>
-        
-        <div class="info">
-          <div class="info-section">
-            <p><strong>Cliente:</strong> ${receipt.nombreCliente}</p>
-            <p><strong>Dirección:</strong> ${receipt.direccionCliente || '-'}</p>
-          </div>
-          <div class="info-section">
-            <p><strong>Fecha de Emisión:</strong> ${formatDate(receipt.fechaEmision)}</p>
-            <p><strong>Fecha de Entrega:</strong> ${formatDate(receipt.fechaEntrega)}</p>
-            <p><strong>Nº de Remito:</strong> ${receipt.id}</p>
-          </div>
-        </div>
-        
-        <table>
-          <thead>
-            <tr>
-              <th>Producto</th>
-              <th>Cantidad</th>
-              <th>Unidad</th>
-              <th>Precio Unit.</th>
-              <th>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${receipt.items.map(item => `
-              <tr>
-                <td>${item.nombreProducto}</td>
-                <td>${item.cantidad}</td>
-                <td>${item.unidad}</td>
-                <td>$${item.precioUnitario?.toLocaleString() || 0}</td>
-                <td>$${item.precioTotal?.toLocaleString() || 0}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-        
-        <div class="total">
-          <p>Total: $${receipt.total?.toLocaleString() || 0}</p>
-        </div>
-        
-        <div class="signature">
-          <div class="signature-line">
-            <p>Entregado por</p>
-          </div>
-          <div class="signature-line">
-            <p>Recibido por</p>
-          </div>
-        </div>
-        
-        <div class="footer">
-          <p>Gracias por su compra. Los Verdes - Sistema de Gestión</p>
-        </div>
-        
-        <div class="no-print" style="text-align: center; margin-top: 20px;">
-          <button onclick="window.print()">Imprimir Remito</button>
-        </div>
-      </body>
-      </html>
-    `;
-    
-    printWindow.document.open();
-    printWindow.document.write(content);
-    printWindow.document.close();
-    
-    // Esperar a que se cargue el contenido y luego imprimir
-    printWindow.onload = function() {
-      printWindow.focus();
-      // Esto no imprimirá automáticamente, pero mostrará el diálogo de impresión
-      // printWindow.print();
-    };
+  // Función para abrir modal de entrega
+  function handleMarkAsDelivered(id: string) {
+    setCurrentReceiptId(id);
+    setShowDeliveryModal(true);
   }
 
   // Formatear fecha
@@ -335,23 +174,22 @@ export default function RemitosPage() {
                       <td className="py-3 px-4">
                         <div className="flex justify-center space-x-2">
                           <button
-                            onClick={() => handlePrintReceipt(receipt)}
+                            onClick={() => handlePreviewReceipt(receipt.id!)}
                             className="text-blue-600 hover:text-blue-800"
-                            title="Imprimir"
+                            title="Vista Previa"
                           >
-                            🖨️
+                            👁️
                           </button>
-                          {receipt.estado !== 'entregado' && (
-                            <button
-                              onClick={() => handleMarkAsDelivered(receipt.id)}
-                              className="text-green-600 hover:text-green-800"
-                              title="Marcar como Entregado"
-                            >
-                              ✅
-                            </button>
-                          )}
                           <button
-                            onClick={() => handleDeleteReceipt(receipt.id)}
+                            onClick={() => handleMarkAsDelivered(receipt.id!)}
+                            className="text-green-600 hover:text-green-800"
+                            title="Marcar como Entregado"
+                            disabled={receipt.estado === 'entregado'}
+                          >
+                            ✅
+                          </button>
+                          <button
+                            onClick={() => handleDeleteReceipt(receipt.id!)}
                             className="text-red-600 hover:text-red-800"
                             title="Eliminar"
                           >
@@ -366,6 +204,28 @@ export default function RemitosPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* Modal de vista previa de remito */}
+      {showPreview && selectedReceipt && (
+        <ReceiptPreview
+          receipt={selectedReceipt}
+          onClose={() => setShowPreview(false)}
+        />
+      )}
+
+      {/* Modal para marcar como entregado */}
+      {showDeliveryModal && (
+        <ReceiptDeliveryModal
+          receiptId={currentReceiptId}
+          onClose={() => setShowDeliveryModal(false)}
+          onSave={() => {
+            setShowDeliveryModal(false);
+            loadReceipts();
+            setSuccessMessage('Remito marcado como entregado correctamente');
+            setTimeout(() => setSuccessMessage(''), 3000);
+          }}
+        />
       )}
     </div>
   );

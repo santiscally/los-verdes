@@ -9,7 +9,7 @@ import { es } from 'date-fns/locale';
 import OrderFormModal from '@/components/pedidos/OrderFormalModal';
 import GenerateReceiptModal from '@/components/pedidos/GenerateReceiptModal';
 
-interface OrderItem {
+export interface OrderItem {
   productoId: string;
   nombreProducto: string;
   cantidad: number;
@@ -19,7 +19,7 @@ interface OrderItem {
   observaciones?: string;
 }
 
-interface Order {
+export interface Order {
   id: string;
   clienteId: string;
   nombreCliente: string;
@@ -52,7 +52,7 @@ export default function PedidosPage() {
     try {
       setLoading(true);
       const ordersData = await getAllOrders();
-      setOrders(ordersData);
+      setOrders(ordersData as Order[]);
       setError(null);
     } catch (err) {
       console.error('Error al cargar pedidos:', err);

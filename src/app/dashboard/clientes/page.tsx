@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { getAllClients, deleteClient } from '@/services/clientService';
 import ClientFormModal from '@/components/clientes/ClientFormModal';
 
-interface Client {
+export interface Client {
   id: string;
   nombre: string;
   direccion?: string;
@@ -32,7 +32,7 @@ export default function ClientesPage() {
     try {
       setLoading(true);
       const clientsData = await getAllClients();
-      setClients(clientsData);
+      setClients(clientsData as Client[]);
       setError(null);
     } catch (err) {
       console.error('Error al cargar clientes:', err);

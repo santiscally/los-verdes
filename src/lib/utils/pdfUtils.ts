@@ -2,6 +2,7 @@ import { jsPDF } from 'jspdf';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import 'jspdf-autotable';
+import { Product } from '@/services/productService';
 
 interface OrderItem {
   nombreProducto?: string;
@@ -46,15 +47,6 @@ interface Order {
   total?: number;
 }
 
-interface Product {
-  nombre?: string;
-  unidadPredeterminada?: string;
-  proveedor?: string;
-  precio?: number;
-  stock?: {
-    [key: string]: number;
-  };
-}
 
 /**
  * Genera un PDF de un remito
@@ -331,7 +323,6 @@ export function generateProductListPDF(products: Product[]): jsPDF {
     const formattedRow = [
       product.nombre || '',
       product.unidadPredeterminada || '',
-      product.proveedor || '',
       `$${product.precio?.toLocaleString() || '0'}`,
       stockStr
     ];

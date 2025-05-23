@@ -1,24 +1,17 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { updateProductStock } from '@/services/productService';
+import { Product, updateProductStock } from '@/services/productService';
 
-interface Product {
-  id: string;
-  nombre: string;
-  unidadPredeterminada?: string;
-  stock?: {
-    [key: string]: number;
-  };
-}
 
-interface StockAdjustmentModalProps {
+
+export interface StockAdjustmentModalProps {
   product: Product | null;
   onClose: () => void;
   onSave: () => void;
 }
 
-interface FormData {
+export interface FormData {
   unidad: string;
   cantidad: number;
   esAjuste: boolean;

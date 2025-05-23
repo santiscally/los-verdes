@@ -15,8 +15,8 @@ import {
   QueryDocumentSnapshot
 } from 'firebase/firestore';
 
-import { getProductById, updateProductPrice, updateProductStock } from './productService';
-import { ConsolidatedOrderItem } from './orderService';
+import { convertUnits, getProductById, updateProductPrice, updateProductStock } from './productService';
+import { ConsolidatedOrderItem, ConsolidatedPurchaseItem } from './orderService';
 import { db } from '@/app/firebase/config';
 
 // Interfaces
@@ -329,35 +329,100 @@ export async function deletePurchase(purchaseId: string): Promise<boolean> {
 export async function generatePurchaseFromConsolidatedOrders(
   consolidatedData: {
     fechaEntrega: string | Date;
-    items: ConsolidatedOrderItem[];
+    items: ConsolidatedPurchaseItem[];
     totalPedidos: number;
   }
 ): Promise<Purchase> {
   try {
-    const items = await Promise.all(consolidatedData.items.map(async (item) => {
-      // Obtener información del producto
+    console.log("Iniciando generación de compra con items:", consolidatedData.items.length);
+    
+    // Preparar los items para la compra
+    const purchaseItems: PurchaseItem[] = [];
+    
+    for (const item of consolidatedData.items) {
+      // Verificar que el producto exista
       const product = await getProductById(item.productoId);
       if (!product) {
-        throw new Error(`Producto con ID ${item.productoId} no encontrado`);
+        console.error(`Producto con ID ${item.productoId} no encontrado`);
+        continue; // Saltar este item en lugar de fallar todo el proceso
       }
       
-      return {
-        productoId: item.productoId,
-        nombreProducto: item.nombreProducto || product.nombre,
-        cantidad: item.cantidad,
-        unidad: item.unidad,
-        precio: product.precio || 0,
-        precioTotal: (product.precio || 0) * item.cantidad
-      };
-    }));
+      console.log(`Procesando item: ${item.nombreProducto}`);
+      
+      // Verificar que cantidadOptimaCompra sea un array
+      if (!Array.isArray(item.cantidadOptimaCompra)) {
+        console.error(`Error: cantidadOptimaCompra en ${item.nombreProducto} no es un array`);
+        continue;
+      }
+      
+      // Procesar cada cantidad óptima en el array
+      for (const optima of item.cantidadOptimaCompra) {
+        // Validar que la cantidad sea positiva
+        if (!optima || optima.cantidad <= 0) {
+          console.warn(`Saltando cantidadOptima en ${item.nombreProducto} porque no tiene cantidad válida`);
+          continue;
+        }
+        
+        console.log(`Cantidad óptima: ${optima.cantidad} ${optima.unidad}`);
+        
+        // Obtener precio para esta unidad
+        let precioUnidad = 0;
+        
+        // Intentar obtener el precio específico para esta unidad
+        if (product.precios && product.precios[optima.unidad]) {
+          precioUnidad = product.precios[optima.unidad];
+        } 
+        // Si es la unidad predeterminada, usar el precio base
+        else if (optima.unidad === product.unidadPredeterminada && product.precio) {
+          precioUnidad = product.precio;
+        } 
+        // Si hay conversiones, intentar calcular el precio
+        else if (product.conversiones && product.precio) {
+          try {
+            // Intentar calcular el precio basado en la unidad predeterminada
+            const factor = convertUnits(
+              product,
+              product.unidadPredeterminada,
+              optima.unidad,
+              1
+            );
+            precioUnidad = product.precio * factor;
+          } catch (err) {
+            console.warn(`No se pudo calcular precio para ${product.nombre} en ${optima.unidad}`);
+            precioUnidad = product.precio || 100; // Usar precio base como fallback
+          }
+        } else {
+          // Si no hay ningún precio definido, usar un valor predeterminado
+          precioUnidad = 100;
+          console.warn(`No se encontró precio para ${item.nombreProducto}, usando valor predeterminado`);
+        }
+        
+        // Calcular precio total
+        const precioTotal = precioUnidad * optima.cantidad;
+        
+        console.log(`Agregando item de compra: ${optima.cantidad} ${optima.unidad} a $${precioUnidad}`);
+        
+        // Agregar a la lista de items
+        purchaseItems.push({
+          productoId: item.productoId,
+          nombreProducto: item.nombreProducto,
+          cantidad: optima.cantidad,
+          unidad: optima.unidad,
+          precio: precioUnidad,
+          precioTotal: precioTotal
+        });
+      }
+    }
     
     // Calcular total de la compra
-    const total = items.reduce((sum, item) => sum + item.precioTotal, 0);
+    const total = purchaseItems.reduce((sum, item) => sum + item.precioTotal, 0);
+    
+    console.log(`Generada orden de compra con ${purchaseItems.length} items y total $${total}`);
     
     // Crear objeto de la compra
     const compra = {
       fechaCompra: new Date().toISOString(),
-      items,
+      items: purchaseItems,
       total,
       estado: 'pendiente',
       observaciones: `Generado a partir de pedidos para entrega del ${

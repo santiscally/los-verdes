@@ -231,15 +231,6 @@ export default function PedidosPage() {
                               📄
                             </button>
                           )}
-                          {order.estado === 'pendiente' && (
-                            <button
-                              onClick={() => handleChangeStatus(order.id, 'procesado')}
-                              className="text-blue-600 hover:text-blue-800"
-                              title="Marcar como Procesado"
-                            >
-                              🔄
-                            </button>
-                          )}
                         </div>
                       </td>
                     </tr>

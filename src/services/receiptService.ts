@@ -24,7 +24,7 @@ import {
 } from './orderService';
 
 import { getClientById } from './clientService';
-import { getProductById } from './productService';
+import { getProductById, updateProductStock } from './productService';
 import { db } from '@/app/firebase/config';
 
 // Interfaces
@@ -372,6 +372,13 @@ export async function markReceiptAsDelivered(
     }
     
     const receipt = receiptDoc.data();
+    
+    // Actualizar stock para cada ítem del remito
+    for (const item of receipt.items) {
+      await updateProductStock(item.productoId, {
+        [item.unidad]: -item.cantidad // Restar del stock
+      });
+    }
     
     // Actualizar estado del remito
     const updates = {

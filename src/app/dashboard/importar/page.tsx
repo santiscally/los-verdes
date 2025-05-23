@@ -1,17 +1,19 @@
 'use client';
 
 import { useState, ChangeEvent } from 'react';
-import { importProductsFromCSV, importClientsFromCSV, importOrdersFromCSV, importPurchasesFromCSV } from '@/services/importService';
+import { importOrdersFromCSV, importOrdersWithConversions, importPurchasesFromCSV } from '@/services/importService';
 import Papa from 'papaparse';
+import ImportPreviewModal from '@/components/importar/ImportPreviewModal';
+import ConversionRequestModal from '@/components/productos/ConversionRequestModal';
 
-interface PreviewData {
+export interface PreviewData {
   data: any[];
   meta: {
     fields: string[];
   };
 }
 
-interface ImportResult {
+export interface ImportResult {
   total: number;
   success: number;
   failed: number;
@@ -20,11 +22,15 @@ interface ImportResult {
 
 export default function ImportPage() {
   const [file, setFile] = useState<File | null>(null);
-  const [importType, setImportType] = useState<string>('productos');
+  const [importType, setImportType] = useState<string>('pedidos');
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
+  const [pendingConversions, setPendingConversions] = useState<any[]>([]);
+  const [orderPreview, setOrderPreview] = useState<any[] | null>(null);
+  const [showConversionModal, setShowConversionModal] = useState<boolean>(false);
+  const [showPreviewModal, setShowPreviewModal] = useState<boolean>(false);
 
   // Manejar cambio de archivo
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -51,8 +57,6 @@ export default function ImportPage() {
       }
     });
   };
-
-  // Importar datos
   const handleImport = async () => {
     if (!file) {
       setError('Por favor, selecciona un archivo primero.');
@@ -64,46 +68,22 @@ export default function ImportPage() {
     setSuccess(null);
 
     try {
-      let result: ImportResult;
-
-      switch (importType) {
-        case 'productos':
-          result = await importProductsFromCSV(file);
-          break;
-        case 'clientes':
-          result = await importClientsFromCSV(file);
-          break;
-        case 'pedidos':
-          result = await importOrdersFromCSV(file);
-          break;
-        case 'compras':
-          result = await importPurchasesFromCSV(file);
-          break;
-        default:
-          throw new Error('Tipo de importación no válido');
+      if (importType === 'pedidos') {
+        const result = await importOrdersFromCSV(file, { collectConversions: true });
+        
+        if (result.pendingConversions && result.pendingConversions.length > 0) {
+          // Hay conversiones pendientes, mostrar modal
+          setPendingConversions(result.pendingConversions);
+          setOrderPreview(result.ordersPreviwed || []);
+          setShowConversionModal(true);
+        } else {
+          // No hay conversiones pendientes, continuar
+          finalizarImport(result);
+        }
+      } else {
+        const result = await importPurchasesFromCSV(file);
+        finalizarImport(result);
       }
-
-      setSuccess(`
-        Importación completada:
-        - Total de registros: ${result.total}
-        - Exitosos: ${result.success}
-        - Fallidos: ${result.failed}
-      `);
-
-      // Si hay errores específicos, mostrarlos
-      if (result.failures && result.failures.length > 0) {
-        setError(`
-          Se encontraron algunos errores durante la importación:
-          ${result.failures.map(f => `- ${f.item}: ${f.error}`).join('\n')}
-        `);
-      }
-
-      // Limpiar el archivo seleccionado
-      setFile(null);
-      if (document.getElementById('fileInput')) {
-        (document.getElementById('fileInput') as HTMLInputElement).value = '';
-      }
-      setPreviewData(null);
     } catch (err: any) {
       console.error('Error durante la importación:', err);
       setError(`Error durante la importación: ${err.message}`);
@@ -112,12 +92,100 @@ export default function ImportPage() {
     }
   };
 
+    // Manejar conversiones guardadas
+    const handleConversionsSaved = async (conversions: Map<string, number>) => {
+      try {
+        setShowConversionModal(false);
+        setLoading(true);
+        
+        // Actualizar preview con valores de conversión
+        const updatedPreview = orderPreview!.map(order => ({
+          ...order,
+          items: order.items.map((item: any) => {
+            if (item.conversionRequired) {
+              const key = `${pendingConversions.find((p: any) => 
+                p.productName === item.product && 
+                p.fromUnit === item.unidad
+              )?.productId}-${item.conversionRequired.from}-${item.conversionRequired.to}`;
+              
+              const conversionValue = conversions.get(key);
+              if (conversionValue) {
+                item.conversionRequired.value = conversionValue;
+              }
+            }
+            return item;
+          })
+        }));
+        
+        setOrderPreview(updatedPreview);
+        setShowPreviewModal(true);
+      } catch (err: any) {
+        setError(`Error al actualizar preview: ${err.message}`);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const handleConfirmImport = async () => {
+      try {
+        setShowPreviewModal(false);
+        setLoading(true);
+        
+        // Crear Map de conversiones
+        const conversionsMap = new Map<string, number>();
+        pendingConversions.forEach(conv => {
+          // Buscar valor en el preview
+          orderPreview?.forEach(order => {
+            order.items.forEach((item: any) => {
+              if (item.conversionRequired?.value && 
+                  item.product === conv.productName && 
+                  item.conversionRequired.from === conv.fromUnit) {
+                const key = `${conv.productId}-${conv.fromUnit}-${conv.toUnit}`;
+                conversionsMap.set(key, item.conversionRequired.value);
+              }
+            });
+          });
+        });
+        
+        const result = await importOrdersWithConversions(file!, conversionsMap);
+        finalizarImport(result);
+      } catch (err: any) {
+        setError(`Error al importar con conversiones: ${err.message}`);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const finalizarImport = (result: any) => {
+      setSuccess(`
+        Importación completada:
+        - Total de registros: ${result.total}
+        - Exitosos: ${result.success}
+        - Fallidos: ${result.failed}
+      `);
+  
+      if (result.failures && result.failures.length > 0) {
+        setError(`
+          Se encontraron algunos errores durante la importación:
+          ${result.failures.map((f: any) => `- ${f.item}: ${f.error}`).join('\n')}
+        `);
+      }
+  
+      // Limpiar estado
+      setFile(null);
+      if (document.getElementById('fileInput')) {
+        (document.getElementById('fileInput') as HTMLInputElement).value = '';
+      }
+      setPendingConversions([]);
+      setOrderPreview(null);
+    };
+
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Importar Datos</h1>
         <p className="text-gray-600 mt-2">
-          Importa productos, clientes, pedidos o compras desde archivos CSV.
+          Importa pedidos o compras desde archivos CSV.
         </p>
       </div>
 
@@ -132,8 +200,6 @@ export default function ImportPage() {
             value={importType}
             onChange={(e) => setImportType(e.target.value)}
           >
-            <option value="productos">Productos</option>
-            <option value="clientes">Clientes</option>
             <option value="pedidos">Pedidos</option>
             <option value="compras">Compras</option>
           </select>
@@ -240,37 +306,6 @@ export default function ImportPage() {
         <h2 className="text-xl font-bold mb-4">Instrucciones de Formato</h2>
         
         <div className="mb-4">
-          <h3 className="font-bold text-gray-700">Productos</h3>
-          <p className="text-gray-600 mb-2">
-            El archivo CSV debe incluir las siguientes columnas:
-          </p>
-          <ul className="list-disc list-inside text-gray-600 ml-4">
-            <li>nombre - Nombre del producto (obligatorio)</li>
-            <li>unidad - Unidad de medida (ej. unidad, kg, cajon)</li>
-            <li>precio - Precio del producto</li>
-            <li>proveedor - Nombre del proveedor</li>
-            <li>stock - Cantidad en stock</li>
-            <li>kgPorUnidad - Equivalencia en kg</li>
-            <li>categoria - Categoría del producto</li>
-          </ul>
-        </div>
-        
-        <div className="mb-4">
-          <h3 className="font-bold text-gray-700">Clientes</h3>
-          <p className="text-gray-600 mb-2">
-            El archivo CSV debe incluir las siguientes columnas:
-          </p>
-          <ul className="list-disc list-inside text-gray-600 ml-4">
-            <li>nombre - Nombre del cliente (obligatorio)</li>
-            <li>direccion - Dirección completa</li>
-            <li>telefono - Número de teléfono</li>
-            <li>email - Correo electrónico</li>
-            <li>contacto - Nombre de la persona de contacto</li>
-            <li>observaciones - Notas adicionales</li>
-          </ul>
-        </div>
-        
-        <div className="mb-4">
           <h3 className="font-bold text-gray-700">Pedidos</h3>
           <p className="text-gray-600 mb-2">
             El archivo CSV debe incluir las siguientes columnas:
@@ -302,6 +337,31 @@ export default function ImportPage() {
           </ul>
         </div>
       </div>
+
+      {/* Modal de Conversiones */}
+      {showConversionModal && (
+        <ConversionRequestModal
+          pendingConversions={pendingConversions}
+          onSave={handleConversionsSaved}
+          onCancel={() => {
+            setShowConversionModal(false);
+            setPendingConversions([]);
+            setOrderPreview(null);
+          }}
+        />
+      )}
+      
+      {/* Modal de Preview */}
+      {showPreviewModal && orderPreview && (
+        <ImportPreviewModal
+          orders={orderPreview}
+          onConfirm={handleConfirmImport}
+          onCancel={() => {
+            setShowPreviewModal(false);
+            setOrderPreview(null);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createClient, updateClient } from '@/services/clientService';
 
-interface Client {
+export interface Client {
   id?: string;
   nombre: string;
   direccion?: string;
@@ -13,7 +13,7 @@ interface Client {
   observaciones?: string;
 }
 
-interface ClientFormModalProps {
+export interface ClientFormModalProps {
   client: Client | null;
   onClose: () => void;
   onSave: () => void;

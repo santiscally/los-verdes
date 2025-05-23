@@ -97,10 +97,21 @@ export default function PurchaseQuickEdit({ purchaseId, onSave, onCancel }: Purc
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-        <div className="px-6 py-4 border-b border-gray-200">
+        <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
           <h3 className="text-lg font-medium text-gray-900">
             Actualizar Precios de Compra
           </h3>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-gray-400 hover:text-gray-500 cursor-pointer"
+            disabled={saving}
+          >
+            <span className="sr-only">Cerrar</span>
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
         
         <div className="px-6 py-4">
@@ -175,7 +186,7 @@ export default function PurchaseQuickEdit({ purchaseId, onSave, onCancel }: Purc
           <div className="flex justify-end mt-6 px-6 py-3 border-t border-gray-200 bg-gray-50 rounded-b-lg">
             <button
               type="button"
-              className="mr-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white hover:bg-gray-100 border border-gray-300 rounded-md shadow-sm"
+              className="mr-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white hover:bg-gray-100 border border-gray-300 rounded-md shadow-sm cursor-pointer"
               onClick={onCancel}
               disabled={saving}
             >
@@ -184,7 +195,7 @@ export default function PurchaseQuickEdit({ purchaseId, onSave, onCancel }: Purc
             <button
               type="button"
               onClick={handleSave}
-              className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 border border-transparent rounded-md shadow-sm"
+              className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 border border-transparent rounded-md shadow-sm cursor-pointer"
               disabled={saving}
             >
               {saving ? 'Guardando...' : 'Actualizar Precios'}

@@ -4,9 +4,8 @@
 import { useState, useEffect } from 'react';
 import { 
   getOrdersByDeliveryDate, 
-  consolidateOrdersForPurchase,
   generatePurchaseList,
-  ConsolidatedPurchaseList
+  ConsolidatedPurchaseList // Importar función de depuración
 } from '@/services/orderService';
 import { generatePurchaseFromConsolidatedOrders } from '@/services/purchaseService';
 import { format } from 'date-fns';
@@ -21,17 +20,21 @@ export default function OrderConsolidationView() {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [debug, setDebug] = useState<string | null>(null);
 
   // Cargar pedidos para la fecha seleccionada
   useEffect(() => {
-    loadOrders();
-  }, [deliveryDate]);
+    // No cargar automáticamente al montar el componente
+    // Dejar que el usuario seleccione la fecha y presione buscar
+
+  }, []);
 
   async function loadOrders() {
     try {
       setLoading(true);
       setError(null);
       setSuccess(null);
+      setDebug(null);
       setConsolidatedList(null);
       
       const ordersData = await getOrdersByDeliveryDate(deliveryDate);
@@ -40,7 +43,29 @@ export default function OrderConsolidationView() {
       // Si hay pedidos, generar lista consolidada automáticamente
       if (ordersData.length > 0) {
         const consolidated = await generatePurchaseList(deliveryDate);
-        setConsolidatedList(consolidated);
+        
+        // Verificar la estructura de consolidated.items
+        if (!consolidated.items) {
+          setDebug('Error: consolidated.items es undefined');
+        } else if (!Array.isArray(consolidated.items)) {
+          setDebug('Error: consolidated.items no es un array');
+        } else {
+          setDebug(`Generados ${consolidated.items.length} productos consolidados`);
+          
+          // Verificar structure de cantidadOptimaCompra en cada item
+          let itemsOK = true;
+          for (const item of consolidated.items) {
+            if (!Array.isArray(item.cantidadOptimaCompra)) {
+              setDebug(`Error en item ${item.nombreProducto}: cantidadOptimaCompra no es un array`);
+              itemsOK = false;
+              break;
+            }
+          }
+          
+          if (itemsOK) {
+            setConsolidatedList(consolidated);
+          }
+        }
       }
     } catch (err) {
       console.error('Error al cargar pedidos:', err);
@@ -57,6 +82,11 @@ export default function OrderConsolidationView() {
     try {
       setLoading(true);
       setError(null);
+      setDebug(null);
+      
+      // Depurar la estructura antes de enviar
+      console.log('Estructura antes de generar compra:');
+      console.log(JSON.stringify(consolidatedList, null, 2));
       
       // Generar orden de compra
       await generatePurchaseFromConsolidatedOrders(consolidatedList);
@@ -65,9 +95,10 @@ export default function OrderConsolidationView() {
       setTimeout(() => {
         setSuccess(null);
       }, 5000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error al generar orden de compra:', err);
-      setError('Error al generar la orden de compra. Por favor, intenta nuevamente.');
+      setError(`Error al generar la orden de compra: ${err.message}`);
+      setDebug(err.stack);
     } finally {
       setLoading(false);
     }
@@ -80,14 +111,30 @@ export default function OrderConsolidationView() {
     // Preparar datos para CSV
     const headers = ['Producto', 'Cantidad', 'Unidad', 'Pedidos'];
     const rows = [
-      headers,
-      ...consolidatedList.items.map(item => [
-        item.nombreProducto,
-        item.cantidadOptimaCompra.cantidad.toString(),
-        item.cantidadOptimaCompra.unidad,
-        item.pedidos.length.toString()
-      ])
+      headers
     ];
+
+    // Agregar una fila por cada cantidad óptima de compra
+    consolidatedList.items.forEach(item => {
+      if (Array.isArray(item.cantidadOptimaCompra)) {
+        item.cantidadOptimaCompra.forEach(optima => {
+          rows.push([
+            item.nombreProducto,
+            optima.cantidad.toString(),
+            optima.unidad,
+            item.pedidos.length.toString()
+          ]);
+        });
+      } else {
+        // Fallback por si acaso
+        rows.push([
+          item.nombreProducto,
+          "ERROR", 
+          "ERROR",
+          item.pedidos.length.toString()
+        ]);
+      }
+    });
     
     // Convertir a CSV
     const csvContent = rows.map(row => row.join(',')).join('\n');
@@ -116,6 +163,13 @@ export default function OrderConsolidationView() {
       {success && (
         <div className="mb-4 bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative">
           <span className="block sm:inline">{success}</span>
+        </div>
+      )}
+      
+      {debug && (
+        <div className="mb-4 bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded relative">
+          <span className="block font-bold">Información de depuración:</span>
+          <pre className="text-xs mt-2 overflow-auto max-h-32">{debug}</pre>
         </div>
       )}
       
@@ -163,7 +217,7 @@ export default function OrderConsolidationView() {
         )}
       </div>
       
-      {consolidatedList && (
+      {consolidatedList && consolidatedList.items && (
         <div className="bg-white shadow-md rounded-lg p-6 mb-6">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-semibold">Lista de Compra</h2>
@@ -199,8 +253,16 @@ export default function OrderConsolidationView() {
                   <tr key={index} className="border-t border-gray-200 hover:bg-gray-50">
                     <td className="py-3 px-4">{item.nombreProducto}</td>
                     <td className="py-3 px-4 text-center">
-                      <div className="font-medium">
-                        {item.cantidadOptimaCompra.cantidad.toFixed(2)} {item.cantidadOptimaCompra.unidad}
+                      <div className="space-y-1">
+                        {Array.isArray(item.cantidadOptimaCompra) ? (
+                          item.cantidadOptimaCompra.map((optima, i) => (
+                            <div key={i} className="font-medium">
+                              {optima.cantidad.toFixed(2)} {optima.unidad}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-red-500">Error en formato</div>
+                        )}
                       </div>
                     </td>
                     <td className="py-3 px-4">
@@ -210,21 +272,27 @@ export default function OrderConsolidationView() {
                             Ver detalles ({item.pedidos.length} pedidos)
                           </summary>
                           <div className="mt-2 p-2 bg-gray-50 rounded">
-                            <ul className="space-y-1">
-                              {Object.entries(item.cantidades).map(([unit, qty]) => (
-                                <li key={unit} className="text-gray-600">
-                                  {qty.toFixed(2)} {unit}
-                                </li>
-                              ))}
-                              <li className="mt-2 pt-2 border-t border-gray-200">
-                                <strong>Clientes:</strong>
-                              </li>
-                              {item.pedidos.map((pedido, idx) => (
-                                <li key={idx} className="text-gray-600">
-                                  {pedido.nombreCliente}: {pedido.cantidad} {pedido.unidad}
-                                </li>
-                              ))}
-                            </ul>
+                            <div className="mb-2">
+                              <strong>Cantidades originales:</strong>
+                              <ul className="ml-2">
+                                {Object.entries(item.cantidades).map(([unit, qty]) => (
+                                  <li key={unit} className="text-gray-600">
+                                    {qty.toFixed(2)} {unit}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                            
+                            <div className="mt-3">
+                              <strong>Detalles por cliente:</strong>
+                              <ul className="ml-2 mt-1">
+                                {item.pedidos.map((pedido, idx) => (
+                                  <li key={idx} className="text-gray-600">
+                                    {pedido.nombreCliente}: {pedido.cantidad} {pedido.unidad}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
                           </div>
                         </details>
                       </div>

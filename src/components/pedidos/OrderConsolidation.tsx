@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { generatePurchaseList, ConsolidatedPurchaseList, ConsolidatedPurchaseItem } from '@/services/orderService';
+import { generatePurchaseFromConsolidatedOrders } from '@/services/purchaseService';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import DatePicker from 'react-datepicker';
@@ -12,6 +13,8 @@ export default function OrderConsolidation() {
   const [consolidatedList, setConsolidatedList] = useState<ConsolidatedPurchaseList | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [editableItems, setEditableItems] = useState<{[key: string]: number}>({});
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
 
   async function handleConsolidate() {
     try {
@@ -20,11 +23,72 @@ export default function OrderConsolidation() {
       
       const result = await generatePurchaseList(deliveryDate);
       setConsolidatedList(result);
+      
+      // Inicializar valores editables
+      const initialEditableItems: {[key: string]: number} = {};
+      result.items.forEach(item => {
+        const key = `${item.productoId}-${item.cantidadOptimaCompra.unidad}`;
+        initialEditableItems[key] = item.cantidadOptimaCompra.cantidad;
+      });
+      setEditableItems(initialEditableItems);
     } catch (err: any) {
       console.error('Error al consolidar pedidos:', err);
       setError(`Error al consolidar pedidos: ${err.message}`);
     } finally {
       setLoading(false);
+    }
+  }
+
+  function handleQuantityChange(productoId: string, unidad: string, value: string) {
+    const key = `${productoId}-${unidad}`;
+    const numericValue = parseFloat(value);
+    
+    if (!isNaN(numericValue) && numericValue >= 0) {
+      setEditableItems(prev => ({
+        ...prev,
+        [key]: numericValue
+      }));
+    }
+  }
+
+  async function handleGeneratePurchase() {
+    if (!consolidatedList) return;
+    
+    try {
+      setIsGenerating(true);
+      setError(null);
+      
+      // Preparar ítems con cantidades editadas
+      const modifiedItems = consolidatedList.items.map(item => {
+        const key = `${item.productoId}-${item.cantidadOptimaCompra.unidad}`;
+        const editedQuantity = editableItems[key];
+        
+        return {
+          ...item,
+          cantidadOptimaCompra: {
+            ...item.cantidadOptimaCompra,
+            cantidad: editedQuantity
+          }
+        };
+      }).filter(item => item.cantidadOptimaCompra.cantidad > 0);
+      
+      const modifiedConsolidatedList = {
+        ...consolidatedList,
+        items: modifiedItems
+      };
+      
+      await generatePurchaseFromConsolidatedOrders(modifiedConsolidatedList);
+      
+      // Resetear la lista
+      setConsolidatedList(null);
+      setEditableItems({});
+      
+      alert('Orden de compra generada exitosamente');
+    } catch (err: any) {
+      console.error('Error al generar orden de compra:', err);
+      setError(`Error al generar la orden de compra: ${err.message}`);
+    } finally {
+      setIsGenerating(false);
     }
   }
 
@@ -36,15 +100,20 @@ export default function OrderConsolidation() {
       // Encabezados
       ['ITEM', 'Q', 'UM', 'Precio', 'Precio Referencia', 'NAVE', 'TOTAL'],
       // Filas de datos
-      ...consolidatedList.items.map(item => [
-        item.nombreProducto,
-        item.cantidadOptimaCompra.cantidad.toFixed(2),
-        item.cantidadOptimaCompra.unidad,
-        '', // Precio a completar manualmente
-        '', // Proveedor a completar manualmente
-        '', // NAVE a completar manualmente
-        '' // TOTAL a completar manualmente
-      ])
+      ...consolidatedList.items.map(item => {
+        const key = `${item.productoId}-${item.cantidadOptimaCompra.unidad}`;
+        const editedQuantity = editableItems[key] || item.cantidadOptimaCompra.cantidad;
+        
+        return [
+          item.nombreProducto,
+          editedQuantity.toFixed(2),
+          item.cantidadOptimaCompra.unidad,
+          '', // Precio a completar manualmente
+          '', // Proveedor a completar manualmente
+          '', // NAVE a completar manualmente
+          '' // TOTAL a completar manualmente
+        ];
+      })
     ];
     
     // Convertir a CSV
@@ -76,23 +145,22 @@ export default function OrderConsolidation() {
           <label className="block text-gray-700 text-sm font-bold mb-2">
             Fecha de Entrega
           </label>
-          <DatePicker
-            selected={deliveryDate}
-            onChange={(date: Date) => setDeliveryDate(date)}
-            className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-            dateFormat="dd/MM/yyyy"
-            locale={es}
-          />
-        </div>
-        
-        <div className="flex justify-end">
-          <button
-            onClick={handleConsolidate}
-            disabled={loading}
-            className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
-          >
-            {loading ? 'Procesando...' : 'Consolidar Pedidos'}
-          </button>
+          <div className="flex gap-2">
+            <DatePicker
+              selected={deliveryDate}
+              onChange={(date: Date) => setDeliveryDate(date)}
+              className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+              dateFormat="dd/MM/yyyy"
+              locale={es}
+            />
+            <button
+              onClick={handleConsolidate}
+              disabled={loading}
+              className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded cursor-pointer"
+            >
+              {loading ? 'Procesando...' : 'Consolidar Pedidos'}
+            </button>
+          </div>
         </div>
       </div>
       
@@ -103,9 +171,16 @@ export default function OrderConsolidation() {
             <div className="flex space-x-2">
               <button
                 onClick={handleExportToCSV}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded cursor-pointer"
               >
                 Exportar CSV
+              </button>
+              <button
+                onClick={handleGeneratePurchase}
+                disabled={isGenerating}
+                className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded cursor-pointer"
+              >
+                {isGenerating ? 'Generando...' : 'Generar Orden de Compra'}
               </button>
             </div>
           </div>
@@ -126,34 +201,47 @@ export default function OrderConsolidation() {
                 </tr>
               </thead>
               <tbody>
-                {consolidatedList.items.map((item, index) => (
-                  <tr key={index} className="border-t border-gray-200 hover:bg-gray-50">
-                    <td className="py-3 px-4">
-                      <div className="font-medium">{item.nombreProducto}</div>
-                    </td>
-                    <td className="py-3 px-4 text-center">
-                      <div className="font-medium">
-                        {item.cantidadOptimaCompra.cantidad.toFixed(2)} {item.cantidadOptimaCompra.unidad}
-                      </div>
-                      <div className="text-sm text-gray-500">
-                        {Object.entries(item.cantidades).map(([unit, qty]) => (
-                          <div key={unit}>
-                            {qty.toFixed(2)} {unit}
-                          </div>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="text-sm max-h-32 overflow-y-auto">
-                        {item.pedidos.map((pedido, idx) => (
-                          <div key={idx} className="mb-1 pb-1 border-b border-gray-100">
-                            {pedido.nombreCliente}: {pedido.cantidad} {pedido.unidad}
-                          </div>
-                        ))}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {consolidatedList.items.map((item, index) => {
+                  const key = `${item.productoId}-${item.cantidadOptimaCompra.unidad}`;
+                  const editedQuantity = editableItems[key] || item.cantidadOptimaCompra.cantidad;
+                  
+                  return (
+                    <tr key={index} className="border-t border-gray-200 hover:bg-gray-50">
+                      <td className="py-3 px-4">
+                        <div className="font-medium">{item.nombreProducto}</div>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <input
+                            type="number"
+                            value={editedQuantity}
+                            onChange={(e) => handleQuantityChange(
+                              item.productoId, 
+                              item.cantidadOptimaCompra.unidad, 
+                              e.target.value
+                            )}
+                            className="w-24 px-2 py-1 border rounded text-center"
+                            min="0"
+                            step="1"
+                          />
+                          <span>{item.cantidadOptimaCompra.unidad}</span>
+                        </div>
+                        <div className="text-sm text-gray-500 mt-1">
+                          Requerido: {item.cantidadOptimaCompra.cantidad.toFixed(2)}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="text-sm max-h-32 overflow-y-auto">
+                          {item.pedidos.map((pedido, idx) => (
+                            <div key={idx} className="mb-1 pb-1 border-b border-gray-100">
+                              {pedido.nombreCliente}: {pedido.cantidad} {pedido.unidad}
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

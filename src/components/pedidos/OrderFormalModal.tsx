@@ -20,7 +20,7 @@ import QuickProductCreation from '@/components/productos/QuickProductCreation';
 import UnitConversionRequest from '@/components/productos/UnitConversionRequest';
 
 // Restauramos las interfaces originales
-interface OrderItem {
+export interface OrderItem {
   productoId: string;
   nombreProducto: string;
   cantidad: number;
@@ -30,7 +30,7 @@ interface OrderItem {
   observaciones?: string;
 }
 
-interface Order {
+export interface Order {
   id?: string;
   clienteId: string;
   nombreCliente: string;

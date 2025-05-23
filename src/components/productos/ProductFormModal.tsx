@@ -1,28 +1,8 @@
-// src/components/productos/ProductFormModal.tsx
-// Simplificar el formulario de creación/edición de productos
-
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createProduct, updateProduct } from '@/services/productService';
+import { createProduct, Product, updateProduct } from '@/services/productService';
 
-interface Conversiones {
-  [key: string]: {
-    [key: string]: number;
-  };
-}
-
-interface Product {
-  id?: string;
-  nombre: string;
-  unidadPredeterminada?: string;
-  precio?: number;
-  margenGanancia?: number;
-  stock?: {
-    [key: string]: number;
-  };
-  conversiones?: Conversiones;
-}
 
 interface ProductFormModalProps {
   product: Product | null;
@@ -63,30 +43,13 @@ export default function ProductFormModal({ product, onClose, onSave }: ProductFo
     if (name === 'precio') {
       setFormData({ ...formData, [name]: parseFloat(value) || 0 });
     } else if (name === 'margenGanancia') {
-      // Convertir de porcentaje a multiplicador (ej: 10% -> 1.1)
+      // Convertir de porcentaje a multiplicador y redondear a 1 decimal
       const margin = parseFloat(value) || 0;
-      // Redondear a 1 decimal
-      const roundedMargin = Math.round((1 + (margin / 100)) * 10) / 10;
+      const roundedMargin = Math.round((1 + margin / 100) * 10) / 10;
       setFormData({ ...formData, [name]: roundedMargin });
     } else {
       setFormData({ ...formData, [name]: value });
     }
-  };
-
-  // Manejar cambios en conversiones
-  const handleConversionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    const [unit, toUnit] = name.split('-'); // ej: "cajon-kg"
-    
-    const updatedConversions = { ...(formData.conversiones || {}) };
-    
-    if (!updatedConversions[unit]) {
-      updatedConversions[unit] = {};
-    }
-    
-    updatedConversions[unit][toUnit] = parseFloat(value) || 0;
-    
-    setFormData({ ...formData, conversiones: updatedConversions });
   };
 
   // Guardar producto
@@ -206,28 +169,6 @@ export default function ProductFormModal({ product, onClose, onSave }: ProductFo
                 step="1"
                 className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
               />
-            </div>
-          </div>
-          
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2">
-              Conversiones
-            </label>
-            
-            <div className="border border-gray-200 rounded p-3 mb-2">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-sm font-medium">Kilos por {formData.unidadPredeterminada}</span>
-                <input
-                  type="number"
-                  name={`${formData.unidadPredeterminada}-kg`}
-                  value={formData.conversiones?.[formData.unidadPredeterminada || '']?.kg || ''}
-                  onChange={handleConversionChange}
-                  min="0"
-                  step="0.01"
-                  placeholder="Ej: 10"
-                  className="shadow appearance-none border rounded w-32 py-1 px-2 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
-                />
-              </div>
             </div>
           </div>
           

@@ -24,7 +24,9 @@ import { db } from '@/app/firebase/config';
 import { 
   getProductById, 
   convertUnits,
-  getAvailableUnits
+  getAvailableUnits,
+  Product,
+  updateProduct
 } from './productService';
 
 // Interfaces
@@ -85,7 +87,7 @@ export interface ConsolidatedPurchaseItem {
   cantidadOptimaCompra: {
     unidad: string;
     cantidad: number;
-  };
+  }[];
   pedidos: {
     pedidoId: string;
     clienteId: string;
@@ -126,8 +128,37 @@ export async function createOrder(orderData: Omit<Order, 'id' | 'estado' | 'tota
         throw new Error(`Producto con ID ${item.productoId} no encontrado`);
       }
       
+      // Asegurar que el producto tenga una unidad predeterminada
+      if (!product.unidadPredeterminada) {
+        console.warn(`Producto ${product.nombre} no tiene unidad predeterminada. Asignando '${item.unidad}' como predeterminada.`);
+        product.unidadPredeterminada = item.unidad;
+        try {
+          await updateProduct(product.id!, { unidadPredeterminada: item.unidad });
+        } catch (error) {
+          console.error(`Error al actualizar unidad predeterminada para ${product.nombre}:`, error);
+        }
+      }
+      
+      // Obtener precio para esta unidad - SOLO PRECIOS DEFINIDOS MANUALMENTE
+      let precioBase = null;
+      
+      // 1. Verificar si hay precio específico para esta unidad en product.precios
+      if (product.precios && product.precios[item.unidad]) {
+        precioBase = product.precios[item.unidad];
+      }
+      // 2. Si es la unidad predeterminada, usar el precio general del producto
+      else if (item.unidad === product.unidadPredeterminada && product.precio) {
+        precioBase = product.precio;
+      }
+      
+      // Si no hay precio definido, usar precio temporal
+      if (!precioBase) {
+        console.warn(`No hay precio definido para ${product.nombre} en unidad ${item.unidad}. Asignando precio temporal.`);
+        precioBase = 0; // Precio temporal para que la importación pueda continuar
+      }
+      
       // Calcular precio con margen de ganancia
-      const precioVenta = (product.precio || 0) * (product.margenGanancia || 1.1);
+      const precioVenta = precioBase * (product.margenGanancia || 1.1);
       
       // Calcular precio total
       const precioTotal = precioVenta * item.cantidad;
@@ -568,17 +599,20 @@ export async function consolidateOrdersForPurchase(
 }
 
 /**
- * Agrupa y consolida productos de múltiples pedidos para generar una lista de compra
+ * Agrupar pedidos para generar orden de compra consolidada
  * 
- * @param deliveryDate - Fecha de entrega para filtrar pedidos
- * @returns Lista consolidada para compra
+ * @param deliveryDate - Fecha de entrega
+ * @returns Pedidos consolidados
  */
 export async function generatePurchaseList(
   deliveryDate: string | Date
 ): Promise<ConsolidatedPurchaseList> {
   try {
+    console.log(`Generando lista de compra para fecha: ${typeof deliveryDate === 'string' ? deliveryDate : deliveryDate.toISOString()}`);
+    
     // Obtener pedidos para la fecha indicada
     const orders = await getOrdersByDeliveryDate(deliveryDate);
+    console.log(`Encontrados ${orders.length} pedidos para la fecha seleccionada`);
     
     // Mapa para agrupar items por producto
     const consolidatedItems: {[key: string]: ConsolidatedPurchaseItem} = {};
@@ -600,10 +634,7 @@ export async function generatePurchaseList(
             productoId: item.productoId,
             nombreProducto: item.nombreProducto,
             cantidades: {},
-            cantidadOptimaCompra: {
-              unidad: product.unidadPredeterminada,
-              cantidad: 0
-            },
+            cantidadOptimaCompra: [], // Ahora es un array
             pedidos: []
           };
         }
@@ -626,6 +657,8 @@ export async function generatePurchaseList(
       }
     }
     
+    console.log(`Consolidados ${Object.keys(consolidatedItems).length} productos diferentes`);
+    
     // Calcular la cantidad óptima de compra para cada producto
     const itemsArray = await Promise.all(
       Object.values(consolidatedItems).map(async (item) => {
@@ -635,72 +668,33 @@ export async function generatePurchaseList(
           return item;
         }
         
-        // Convertir todas las cantidades a la unidad predeterminada
-        let totalInDefaultUnit = 0;
+        console.log(`Calculando cantidades óptimas para ${item.nombreProducto}`);
+        console.log(`Cantidades originales:`, item.cantidades);
         
-        for (const [unit, quantity] of Object.entries(item.cantidades)) {
-          try {
-            if (unit === product.unidadPredeterminada) {
-              totalInDefaultUnit += quantity;
-            } else {
-              // Intentar convertir a la unidad predeterminada
-              try {
-                const convertedQty = convertUnits(
-                  product, 
-                  unit, 
-                  product.unidadPredeterminada, 
-                  quantity
-                );
-                totalInDefaultUnit += convertedQty;
-              } catch (error) {
-                console.error(`Error al convertir de ${unit} a ${product.unidadPredeterminada}:`, error);
-                // Si falla la conversión, mantener la cantidad en la unidad original
-                if (!item.cantidadOptimaCompra.unidad) {
-                  item.cantidadOptimaCompra.unidad = unit;
-                  item.cantidadOptimaCompra.cantidad = quantity;
-                } else {
-                  // Si ya hay una unidad asignada, mantener la más grande
-                  if (quantity > item.cantidadOptimaCompra.cantidad) {
-                    item.cantidadOptimaCompra.unidad = unit;
-                    item.cantidadOptimaCompra.cantidad = quantity;
-                  }
-                }
-              }
-            }
-          } catch (error) {
-            console.error(`Error al procesar cantidades:`, error);
-          }
-        }
+        // Aplicar conversiones para optimizar (unidades pequeñas a grandes)
+        const cantidadesOptimizadas = optimizarCantidades(product, item.cantidades);
         
-        // Verificar stock existente
-        const currentStock = product.stock && product.stock[product.unidadPredeterminada] 
-          ? product.stock[product.unidadPredeterminada] 
-          : 0;
+        console.log(`Cantidades optimizadas:`, cantidadesOptimizadas);
         
-        // Restar stock existente de la cantidad requerida
-        const requiredQuantity = Math.max(0, totalInDefaultUnit - currentStock);
+        // Convertir el objeto de cantidades optimizadas a un array de { unidad, cantidad }
+        const cantidadesCompra = Object.entries(cantidadesOptimizadas)
+          .map(([unidad, cantidad]) => ({ unidad, cantidad }));
         
-        // Redondear hacia arriba para unidades enteras como cajones o bolsas
-        if (['cajon', 'bolsa', 'bandeja', 'atado', 'riestra'].includes(product.unidadPredeterminada)) {
-          const roundedQuantity = Math.ceil(requiredQuantity);
-          item.cantidadOptimaCompra = {
-            unidad: product.unidadPredeterminada,
-            cantidad: roundedQuantity
-          };
-        } else {
-          // Para unidades continuas como kg, no es necesario redondear
-          item.cantidadOptimaCompra = {
-            unidad: product.unidadPredeterminada,
-            cantidad: requiredQuantity
-          };
-        }
+        console.log(`Cantidades de compra (array):`, cantidadesCompra);
+        
+        // Actualizar el item con las cantidades óptimas
+        item.cantidadOptimaCompra = cantidadesCompra;
         
         return item;
       })
     );
     
     // Filtrar items con cantidad a comprar = 0
-    const itemsToOrder = itemsArray.filter(item => item.cantidadOptimaCompra.cantidad > 0);
+    const itemsToOrder = itemsArray.filter(item => 
+      item.cantidadOptimaCompra && item.cantidadOptimaCompra.length > 0
+    );
+    
+    console.log(`Items finales a comprar: ${itemsToOrder.length}`);
     
     return {
       fechaEntrega: deliveryDate,
@@ -712,7 +706,162 @@ export async function generatePurchaseList(
     throw error;
   }
 }
+/**
+ * Optimiza las cantidades convirtiendo unidades menores a mayores según las conversiones disponibles
+ * 
+ * @param product - Producto con información de conversiones
+ * @param cantidades - Cantidades en diferentes unidades
+ * @returns Cantidades optimizadas
+ */
+function optimizarCantidades(
+  product: Product, 
+  cantidades: {[unidad: string]: number}
+): {[unidad: string]: number} {
+  const resultado = { ...cantidades };
+  const conversiones = product.conversiones || {};
+  
+  // Para las unidades específicas que sabemos que deberían tener prioridad
+  // (casos específicos como cajon > kg)
+  if (resultado['kg'] && resultado['cajon']) {
+    console.log("Procesando conversión de kg a cajon");
+    // Verifica si tenemos la conversión necesaria
+    if (conversiones['kg'] && conversiones['kg']['cajon']) {
+      // Para 1 kg, cuántos cajones obtenemos
+      const kgACajon = conversiones['kg']['cajon']; // Esto debería ser 0.1 (1kg = 0.1 cajon)
+      
+      // Cuántos cajones completos podemos obtener
+      const cajonesCompletos = Math.floor(resultado['kg'] * kgACajon);
+      
+      if (cajonesCompletos > 0) {
+        console.log(`Convirtiendo ${resultado['kg']} kg a cajones (${cajonesCompletos})`);
+        
+        // Actualizar cantidad de cajones
+        resultado['cajon'] += cajonesCompletos;
+        
+        // Actualizar kg restantes
+        const kgsConvertidos = cajonesCompletos / kgACajon; // Esto debería ser cajonesCompletos * 10
+        resultado['kg'] -= kgsConvertidos;
+        
+        console.log(`Quedan ${resultado['kg']} kg y ahora hay ${resultado['cajon']} cajones`);
+      }
+    }
+  }
+  
+  // Aplicar otras conversiones si es necesario
+  // Este código se deja aquí para otros tipos de conversiones que puedan ser necesarias
+  let cambioRealizado = true;
+  const unidadesProcesadas = new Set<string>(); // Evitar procesar múltiples veces las mismas unidades
+  
+  // Seguir iterando mientras haya cambios
+  while (cambioRealizado) {
+    cambioRealizado = false;
+    
+    // Para cada par de unidades que no sean kg/cajon (ya procesados arriba)
+    for (const [unidadMayor, conversionMap] of Object.entries(conversiones)) {
+      for (const [unidadMenor, factorConversion] of Object.entries(conversionMap)) {
+        // Evitar procesar kg/cajon de nuevo y solo procesar si no ha sido procesado
+        if ((unidadMayor === 'cajon' && unidadMenor === 'kg') || 
+            (unidadMayor === 'kg' && unidadMenor === 'cajon') ||
+            unidadesProcesadas.has(`${unidadMayor}-${unidadMenor}`)) {
+          continue;
+        }
+        
+        // Marcar como procesado
+        unidadesProcesadas.add(`${unidadMayor}-${unidadMenor}`);
+        
+        // Solo si tenemos la unidad menor en el resultado
+        if (resultado[unidadMenor] && resultado[unidadMenor] > 0) {
+          // Cantidad de unidades menores que se pueden convertir a mayores
+          const cantidadConvertible = Math.floor(resultado[unidadMenor] / factorConversion);
+          
+          if (cantidadConvertible > 0) {
+            console.log(`Convirtiendo ${resultado[unidadMenor]} ${unidadMenor} a ${unidadMayor}`);
+            
+            // Convertir unidades menores a mayores
+            if (!resultado[unidadMayor]) resultado[unidadMayor] = 0;
+            resultado[unidadMayor] += cantidadConvertible;
+            resultado[unidadMenor] -= cantidadConvertible * factorConversion;
+            
+            // Eliminar la unidad si llega a cero o es muy cercano a cero
+            if (Math.abs(resultado[unidadMenor]) < 0.001) {
+              delete resultado[unidadMenor];
+            }
+            
+            cambioRealizado = true;
+          }
+        }
+      }
+    }
+  }
+  
+  // Eliminar cualquier cantidad muy cercana a cero (por errores de punto flotante)
+  Object.keys(resultado).forEach(unidad => {
+    if (Math.abs(resultado[unidad]) < 0.001) {
+      delete resultado[unidad];
+    }
+  });
+  
+  return resultado;
+}
 
+
+/**
+ * Determina las unidades óptimas para la compra
+ * 
+ * @param cantidades - Cantidades optimizadas por unidad
+ * @returns Unidad y cantidad óptima para compra
+ */
+/**
+ * Determina las unidades óptimas para la compra
+ * 
+ * @param cantidades - Cantidades optimizadas por unidad
+ * @returns Unidad y cantidad óptima para compra
+ */
+function determinarUnidadesOptimas(cantidades: {[unidad: string]: number}): {unidad: string, cantidad: number} {
+  console.log("Determinando unidades óptimas a partir de:", cantidades);
+  
+  // Si no hay cantidades, devolver un valor por defecto
+  if (!cantidades || Object.keys(cantidades).length === 0) {
+    console.warn("No hay cantidades para determinar unidades óptimas");
+    return { unidad: "unidad", cantidad: 0 };
+  }
+  
+  // Buscar la unidad con mayor cantidad (priorizando unidades mayores)
+  let unidadOptima = "";
+  let cantidadOptima = 0;
+  
+  // Orden de prioridad: cajon > kg > unidad (podría ampliarse según necesidades)
+  const prioridades: {[unidad: string]: number} = {
+    "cajon": 100,
+    "kg": 50,
+    "unidad": 10,
+    // Añadir más unidades si es necesario
+  };
+  
+  // Primera pasada: buscar la unidad con mayor prioridad que tenga cantidad > 0
+  for (const [unidad, cantidad] of Object.entries(cantidades)) {
+    const prioridad = prioridades[unidad] || 1; // Si no está en la lista, prioridad baja
+    
+    if (cantidad > 0 && (unidadOptima === "" || prioridad > (prioridades[unidadOptima] || 0))) {
+      unidadOptima = unidad;
+      cantidadOptima = cantidad;
+    }
+  }
+  
+  // Si no encontramos ninguna, tomar la primera con cantidad > 0
+  if (unidadOptima === "") {
+    for (const [unidad, cantidad] of Object.entries(cantidades)) {
+      if (cantidad > 0) {
+        unidadOptima = unidad;
+        cantidadOptima = cantidad;
+        break;
+      }
+    }
+  }
+  
+  console.log(`Unidad óptima determinada: ${cantidadOptima} ${unidadOptima}`);
+  return { unidad: unidadOptima, cantidad: cantidadOptima };
+}
 /**
  * Obtiene el stock necesario para cubrir los pedidos de una fecha
  * teniendo en cuenta el stock actual
